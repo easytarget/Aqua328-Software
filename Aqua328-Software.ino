@@ -36,12 +36,13 @@ int buzzer = 10;
 #define USERSWITCH 8 // digital pin  
 
 // Lights
+//#define RED 9   // Red LED PWM n FAN
 #define RED 5   // Red LED PWM on Digital 5
 #define GREEN 6 // Red LED PWM on Digital 6
 #define BLUE 3  // Red LED PWM on Digital 3
 
 // Fan
-#define FAN 9 // Fan PWM on Digital 9
+//#define FAN 9 // Fan PWM on Digital 9
 
 void setup()
 {
@@ -58,11 +59,11 @@ void setup()
   pinMode(RED,OUTPUT);              // PWM, RED led channel
   pinMode(GREEN,OUTPUT);            // PWM, GREEN led channel
   pinMode(BLUE,OUTPUT);             // PWM, BLUE led channel
-  pinMode(FAN,OUTPUT);              // PWM, Fan
+//  pinMode(FAN,OUTPUT);              // PWM, Fan
   analogWrite(RED,0);               // Ensure defaulted to Off
   analogWrite(GREEN,0);             // Ensure defaulted to Off
   analogWrite(BLUE,0);              // Ensure defaulted to Off
-  analogWrite(FAN,0);               // Ensure defaulted to Off
+//  analogWrite(FAN,255);               // Ensure defaulted to Off
 
   lcd.init(); // Start lcd up
   lcd.noCursor(); // do not display cursor
@@ -86,16 +87,6 @@ char getpress() {
     delay(10);
   }
   char c = Serial.read();
-  //Serial.print("'");
-  //Serial.print(c);
-  //Serial.println("' received.");
-  // 
-  //delay(10); 
-  //while(Serial.available())
-  //{
-  //  Serial.read();
-  //  delay(10);
-  //}
   return c;
 }
 
@@ -160,28 +151,28 @@ void lightsofftune() {
   }
 }
 
-void cycleOn() {
+void cycleOn(int del) {
   Serial.println(F("Coming On:"));  
   lcd.setCursor(0,1);
   lcd.print(F("Starting"));
   Serial.print(F("Red"));
   for (int a = 0; a <= 255; a++) {
     analogWrite(RED,a);
-    delay(100);
+    delay(del);
     Serial.print(".");
   }
   Serial.println();
   Serial.print(F("Green"));
   for (int a = 0; a <= 255; a++) {
     analogWrite(GREEN,a);
-    delay(100);
+    delay(del);
     Serial.print(".");
   }
   Serial.println();
   Serial.print(F("Blue"));
   for (int a = 0; a <= 255; a++) {
     analogWrite(BLUE,a);
-    delay(100);
+    delay(del);
     Serial.print(".");
   }
   Serial.println();
@@ -190,28 +181,28 @@ void cycleOn() {
   lcd.print(F("On      "));
 }
 
-void cycleOff() {
+void cycleOff(int del) {
   Serial.println(F("Going Off:"));  
   lcd.setCursor(0,1);
   lcd.print(F("Stopping"));
   Serial.print(F("Red"));
   for (int a = 255; a >= 0; a--) {
     analogWrite(RED,a);
-    delay(100);
+    delay(del);
     Serial.print(".");
   }
   Serial.println();
   Serial.print(F("Green"));
   for (int a = 255; a >= 0; a--) {
     analogWrite(GREEN,a);
-    delay(100);
+    delay(del);
     Serial.print(".");
   }
   Serial.println();
   Serial.print(F("Blue"));
   for (int a = 255; a >= 0; a--) {
     analogWrite(BLUE,a);
-    delay(100);
+    delay(del);
     Serial.print(".");
   }
   Serial.println();
@@ -246,11 +237,11 @@ void loop()
       buttonHit=false;
       if (lightStatus == 0) {
         // turn on
-        cycleOn();
+        cycleOn(25);
         lightStatus = 1;
       } else {
         // turn off 
-        cycleOff();
+        cycleOff(25);
         lightStatus = 0;
       }
     }
