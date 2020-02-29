@@ -32,18 +32,25 @@ int tempo = 180;
 // change this to whichever pin you want to use
 int buzzer = 10;
 
-
+// Switches
+#define LIDSWITCH 7 // digital pin D7
+#define USERSWITCH 8 // digital pin D8
 
 void setup()
 {
+  // Serial first
   Serial.begin(9600);
+  // General IO Pins
+  pinMode(LIDSWITCH,INPUT_PULLUP); // Lid switch to input & pull-up
+  pinMode(USERSWITCH,INPUT_PULLUP); // User button to input & pull-up
+
   lcd.init(); // Start lcd up
   lcd.noCursor(); // do not display cursor
   lcd.setCursor(1,0); // home
   lcd.print("Power On"); // welcome text.
   lcd.setCursor(1,1); // home
   lcd.backlight();
-  startuptune();
+  lightsontune();
   lcd.noBacklight();
   Serial.println("Type Stuff:");
 }
@@ -67,7 +74,7 @@ char getpress() {
   return c;
 }
 
-void startuptune() {
+void lightsontune() {
   
   // Adapted from the 'Nokia Ringtone' sketch found at:
   // https://github.com/robsoncouto/arduino-songs
@@ -100,25 +107,58 @@ void startuptune() {
   }
 
 }
+void lightsofftune() {
+  // Adapted from the 'Star trek Intro' sketch found at:
+  // https://github.com/robsoncouto/arduino-songs
+  int melody[] = {
+  // Star Trek Intro
+  // Score available at https://musescore.com/user/10768291/scores/4594271
+    NOTE_D4, -8, NOTE_G4, 16, NOTE_C5, -4, 
+    NOTE_B4, 8, NOTE_G4, -16, NOTE_E4, -16, NOTE_A4, -16,
+    NOTE_D5, 2,
+  };
+  int notes = sizeof(melody) / sizeof(melody[0]) / 2;
+  int wholenote = (60000 * 4) / tempo;
+  int divider = 0, noteDuration = 0;
+
+  for (int thisNote = 0; thisNote < notes * 2; thisNote = thisNote + 2) {
+    divider = melody[thisNote + 1];
+    if (divider > 0) {
+      noteDuration = (wholenote) / divider;
+    } else if (divider < 0) {
+      noteDuration = (wholenote) / abs(divider);
+      noteDuration *= 1.5; // increases the duration in half for dotted notes
+    }
+    // we only play the note for 90% of the duration, leaving 10% as a pause
+    tone(buzzer, melody[thisNote], noteDuration * 0.9);
+    delay(noteDuration);
+    noTone(buzzer);
+    lcd.print('.'); //animate on the start screen
+  }
+}
 
 void loop()
 {
   // Print a message to the LCD.
   lcd.clear();
   lcd.setCursor(1,0);
-  lcd.print("Aqua328");
+  lcd.print(F("Aqua328"));
   delay(1000);
   lcd.setCursor(1,1);
-  lcd.print("Demo");
+  lcd.print(F("Lid:"));
+  lcd.print(!digitalRead(LIDSWITCH));
+  lcd.setCursor(8,1);
+  lcd.print(F("User:"));
+  lcd.print(!digitalRead(USERSWITCH));
   char ret = getpress();
   lcd.noBacklight();
   lcd.clear();
   lcd.setCursor(1,0);
-  lcd.print("Serial:");
+  lcd.print(F("Serial:"));
   lcd.setCursor(8,0);
   lcd.print(ret);
   lcd.setCursor(1,1);
   lcd.backlight();
   delay(250);
-  startuptune();
+  lightsofftune();
 }
