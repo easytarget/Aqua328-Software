@@ -4,7 +4,13 @@
 
 #include "musicnotes.h"
 
+// 1602 display
 LiquidCrystal_I2C lcd(0x3F,16,2);  // set the LCD address to 0x3F for a 16 chars and 2 line display
+
+//  Some custom glyphs for the display
+static byte onGlyph[8] = { 0b00100,0b01110,0b11111,0b10101,0b00100,0b00100,0b00100,0b00100 };
+static byte offGlyph[8] = { 0b00100,0b00100,0b00100,0b00100,0b10101,0b11111,0b01110,0b00100 };
+static byte degreesGlyph[8] = { 0b00110,0b01001,0b01001,0b00110,0b00000,0b00000,0b00000,0b00000 };
 
 // Data wire is plugged into port 2 on the Arduino
 #define ONE_WIRE_BUS 2
@@ -16,13 +22,7 @@ OneWire oneWire(ONE_WIRE_BUS);
 // Pass our oneWire reference to Dallas Temperature.
 DallasTemperature sensors(&oneWire);
 
-// arrays to hold device addresses
-//DeviceAddress insideThermometer, outsideThermometer;
-
-// Assign address manually. The addresses below will need to be changed
-// to valid device addresses on your bus. Device address can be retrieved
-// by using either oneWire.search(deviceAddress) or individually via
-// sensors.getAddress(deviceAddress, index)
+// Assign address manually. 
 DeviceAddress tankThermometer  = { 0x10, 0x38, 0x4E, 0x2A, 0x03, 0x08, 0x00, 0x05 };
 
 // Sound Setup
@@ -36,22 +36,31 @@ int buzzer = 10;
 #define USERSWITCH 8 // digital pin  
 
 // Lights
-//#define RED 9   // Red LED PWM n FAN
 #define RED 5   // Red LED PWM on Digital 5
 #define GREEN 6 // Red LED PWM on Digital 6
 #define BLUE 3  // Red LED PWM on Digital 3
 
+byte redVal = 0;   // current red value
+byte greenVal = 0; // current green value
+byte blueVal = 0;  // current blue value
+
+int fastFadeRate = 30; // Rate (millis per step) for maintenance on/off cycle
+int slowFadeRate = 1500; // Rate (millis per step) for day on/off cycle
+bool serialTemps = false; // Show temperature on serial port
+ 
+
 // Fan
-//#define FAN 9 // Fan PWM on Digital 9
+#define FAN 9 // Fan PWM on Digital 9
+
+int timeScale; // Used to scale time readings when we adjust Timer0 multiplier
 
 void setup()
 {
-  // Serial first
+  // Serial
   Serial.begin(19200);
+  
   // OneWire temp sensors
   sensors.begin();
-
-  // Turn Speaker Tansistor OFF.
 
   // General IO Pins
   pinMode(LIDSWITCH,INPUT_PULLUP);  // Lid switch to input & pull-up
@@ -59,32 +68,52 @@ void setup()
   pinMode(RED,OUTPUT);              // PWM, RED led channel
   pinMode(GREEN,OUTPUT);            // PWM, GREEN led channel
   pinMode(BLUE,OUTPUT);             // PWM, BLUE led channel
-//  pinMode(FAN,OUTPUT);              // PWM, Fan
-  analogWrite(RED,0);               // Ensure defaulted to Off
-  analogWrite(GREEN,0);             // Ensure defaulted to Off
-  analogWrite(BLUE,0);              // Ensure defaulted to Off
-//  analogWrite(FAN,255);               // Ensure defaulted to Off
+  pinMode(FAN,OUTPUT);              // PWM, Fan
+  analogWrite(RED,redVal);          // Set default
+  analogWrite(GREEN,greenVal);      // Set default
+  analogWrite(BLUE,blueVal);        // Set default
+  analogWrite(FAN,125);             // Defaulted to 50%
+  
+    // PWM Prescaler to set PWM base frequency; avoids fan noise (whine) and make LED's smooth
+  TCCR0B = TCCR0B & B11111000 | B00000010; // Timer0 (D5,D6) ~7.8 KHz
+  timeScale = 8; // Adjusting Timer0 makes millis() and delay() run faster.
+  TCCR1B = TCCR1B & B11111000 | B00000001; // Timer1 (D9,D10) ~31.4 KHz
+  TCCR2B = TCCR2B & B11111000 | B00000001; // Timer2 (D3,D11) ~31.4 KHz
 
+  // LCD
   lcd.init(); // Start lcd up
   lcd.noCursor(); // do not display cursor
   lcd.backlight(); // light up
-  lcd.setCursor(0,0); // home
-  lcd.print("Aqua328"); // welcome text.
-  lcd.setCursor(1,1); // home
-//  lcd.noBacklight();
+  lcd.createChar(0, onGlyph);
+  lcd.createChar(1, offGlyph);
+  lcd.createChar(2, degreesGlyph); 
+  lcd.setCursor(0,0); 
+  lcd.print("Aqua328");    // welcome text.
+  lcd.setCursor(0,1);
+  lcd.print(F("Off")); // Start 'Off'
+
+
+  // Greetings on serial port
   Serial.println("Welcome to Aqua328");
   Serial.println("https://github.com/easytarget/Aqua328-Software");
 
   sensors.requestTemperatures(); // Send initial command to get temperatures
   // pause on splash screen while temps being gathered
-  delay(3000);
+  mydelay(3000);
 }
 
-char getpress() {
-  // Serial.print("."); // debug
-  unsigned long start = millis();
-  while(!Serial.available() && (start+1000) <= millis()) {
-    delay(10);
+void mydelay(unsigned long d) {
+  delay(d*timeScale);
+}
+
+unsigned long mymillis() {
+  return (millis()/timeScale);
+}
+
+char getpress(int waitTime) {
+  unsigned long start = mymillis();
+  while(!Serial.available() && (start+waitTime) <= mymillis()) {
+    mydelay(10);
   }
   char c = Serial.read();
   return c;
@@ -115,7 +144,7 @@ void lightsontune() {
     }
     // we only play the note for 90% of the duration, leaving 10% as a pause
     tone(buzzer, melody[thisNote], noteDuration * 0.9);
-    delay(noteDuration);
+    mydelay(noteDuration);
     noTone(buzzer);
     lcd.print('.'); //animate on the start screen
   }
@@ -145,81 +174,123 @@ void lightsofftune() {
     }
     // we only play the note for 90% of the duration, leaving 10% as a pause
     tone(buzzer, melody[thisNote], noteDuration * 0.9);
-    delay(noteDuration);
+    mydelay(noteDuration);
     noTone(buzzer);
     lcd.print('.'); //animate on the start screen
   }
 }
 
 void cycleOn(int del) {
-  Serial.println(F("Coming On:"));  
+  Serial.println(F("Coming On: "));  
   lcd.setCursor(0,1);
-  lcd.print(F("Starting"));
-  Serial.print(F("Red"));
+  lcd.write(byte(0)); // 'up' sysmbol we defined in setup()
+  lcd.print(F("     "));
+  Serial.println(F("Red: "));
   for (int a = 0; a <= 255; a++) {
     analogWrite(RED,a);
-    delay(del);
-    Serial.print(".");
+    redVal=a;
+    mydelay(del);
+    showTemp();
   }
-  Serial.println();
-  Serial.print(F("Green"));
+  lcd.setCursor(1,1);
+  lcd.write(byte(0)); // 'up' sysmbol we defined in setup()
+  Serial.println(F("Green: "));
   for (int a = 0; a <= 255; a++) {
     analogWrite(GREEN,a);
-    delay(del);
-    Serial.print(".");
+    greenVal=a;
+    mydelay(del);
+    showTemp();
   }
-  Serial.println();
-  Serial.print(F("Blue"));
+  lcd.setCursor(2,1);
+  lcd.write(byte(0)); // 'up' sysmbol we defined in setup()
+  Serial.println(F("Blue: "));
   for (int a = 0; a <= 255; a++) {
     analogWrite(BLUE,a);
-    delay(del);
-    Serial.print(".");
+    blueVal=a;
+    mydelay(del);
+    showTemp();
   }
-  Serial.println();
   Serial.println(F("On!"));
   lcd.setCursor(0,1);
   lcd.print(F("On      "));
 }
 
 void cycleOff(int del) {
-  Serial.println(F("Going Off:"));  
+  Serial.println(F("Going Off: "));  
   lcd.setCursor(0,1);
-  lcd.print(F("Stopping"));
-  Serial.print(F("Red"));
+  lcd.write(byte(1)); // 'down' sysmbol we defined in setup()
+  lcd.print(F("     "));
+  Serial.println(F("Red: "));
   for (int a = 255; a >= 0; a--) {
     analogWrite(RED,a);
-    delay(del);
-    Serial.print(".");
+    redVal=a;
+    mydelay(del);
+    showTemp();
   }
-  Serial.println();
-  Serial.print(F("Green"));
+  lcd.setCursor(1,1);
+  lcd.write(byte(1)); // 'down' sysmbol we defined in setup()
+  Serial.println(F("Green: "));
   for (int a = 255; a >= 0; a--) {
     analogWrite(GREEN,a);
-    delay(del);
-    Serial.print(".");
+    greenVal=a;
+    mydelay(del);
+    showTemp();
   }
-  Serial.println();
-  Serial.print(F("Blue"));
+  lcd.setCursor(2,1);
+  lcd.write(byte(1)); // 'down' sysmbol we defined in setup()
+  Serial.println(F("Blue: "));
   for (int a = 255; a >= 0; a--) {
     analogWrite(BLUE,a);
-    delay(del);
-    Serial.print(".");
+    mydelay(del);
+    blueVal=a;
+    showTemp();
   }
-  Serial.println();
   Serial.println(F("Off!"));
   lcd.setCursor(0,1);
   lcd.print(F("Off     "));
 }
+
+void showTemp() {
+  // Get the current reading
+  float tankTemp = sensors.getTempC(tankThermometer);
+  // Request a new temperature reading
+  sensors.requestTemperatures(); 
+
+  // Display the results
+  lcd.setCursor(11,1);
+  if (tankTemp != -127) {
+    lcd.print(tankTemp,1);
+    lcd.write(byte(2));    // 'degrees' sysmbol we defined in setup()
+    lcd.print(F("  "));
+  } else {
+    lcd.print(F("Error"));
+  }
+
+  if (serialTemps) {
+    // Put a loop here to write this once per minute
+    Serial.print(F("Tank: "));
+    Serial.print(tankTemp);
+    Serial.print(char(194));
+    Serial.print(char(176));
+    Serial.print(F("C: Time: "));
+    Serial.print((float)mymillis()/1000,2);
+    Serial.print(F(": R: "));
+    Serial.print(redVal);
+    Serial.print(F(": G: "));
+    Serial.print(greenVal);
+    Serial.print(F(": B: "));
+    Serial.print(blueVal);
+    Serial.println();
+  }  
+}
+
+// Main Loop
 
 int lightStatus = 0; // 0=off, 1=On
 bool buttonHit = false; // set to true when the button is hit
 
 void loop()
 {  
-  // Request a temperature reading
-  sensors.requestTemperatures(); // Send initial command to get temperatures
-  // Hold for one second here, processing serial and buttons
-  char ret = getpress();
   lcd.setCursor(0,0);
   if (!digitalRead(USERSWITCH)) { // switches are inverted..
     lcd.print(F("Button! "));
@@ -237,26 +308,21 @@ void loop()
       buttonHit=false;
       if (lightStatus == 0) {
         // turn on
-        cycleOn(25);
+        cycleOn(slowFadeRate);
         lightStatus = 1;
       } else {
         // turn off 
-        cycleOff(25);
+        cycleOff(slowFadeRate);
         lightStatus = 0;
       }
     }
   }
 
-  float tankTemp = sensors.getTempC(tankThermometer);
-  lcd.setCursor(11,1);
-  lcd.print(tankTemp,1);
-  lcd.print((char)223);
+  // Hold for one second here, processing serial and buttons
+  char ret = getpress(500);
 
-  Serial.print(F("Tank: "));
-  Serial.print(tankTemp);
-  Serial.print(char(194));
-  Serial.print(char(176));
-  Serial.println(F("C"));
-
+  // Show the water temperature.
+  showTemp();
+  
   // And loop back to the button/temp display
 }
