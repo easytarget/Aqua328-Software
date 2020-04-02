@@ -13,7 +13,8 @@ static byte offGlyph[8] = { 0b00100,0b00100,0b00100,0b00100,0b10101,0b11111,0b01
 static byte degreesGlyph[8] = { 0b00110,0b01001,0b01001,0b00110,0b00000,0b00000,0b00000,0b00000 };
 
 // Data wire is plugged into port 2 on the Arduino
-#define ONE_WIRE_BUS 2
+// COLLEGE: #define ONE_WIRE_BUS 2
+#define ONE_WIRE_BUS 4
 #define TEMPERATURE_PRECISION 9
 
 // Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
@@ -23,7 +24,8 @@ OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 
 // Assign address manually. 
-DeviceAddress tankThermometer  = { 0x10, 0x38, 0x4E, 0x2A, 0x03, 0x08, 0x00, 0x05 };
+// COLLEGE: DeviceAddress tankThermometer  = { 0x10, 0x38, 0x4E, 0x2A, 0x03, 0x08, 0x00, 0x05 };
+DeviceAddress tankThermometer  = { 0x10, 0xD8, 0x24, 0x2B, 0x03, 0x08, 0x00, 0x0F };
 
 // Sound Setup
 // change this to make the sounds slower or faster
@@ -88,9 +90,9 @@ void setup()
   lcd.createChar(1, offGlyph);
   lcd.createChar(2, degreesGlyph); 
   lcd.setCursor(0,0); 
-  lcd.print("Aqua328");    // welcome text.
+  lcd.print("Aqua328");    // Say Hello
   lcd.setCursor(0,1);
-  lcd.print(F("Off")); // Start 'Off'
+  lcd.print(F("Welcome!"));
 
 
   // Greetings on serial port
@@ -98,8 +100,10 @@ void setup()
   Serial.println("https://github.com/easytarget/Aqua328-Software");
 
   sensors.requestTemperatures(); // Send initial command to get temperatures
-  // pause on splash screen while temps being gathered
-  mydelay(3000);
+  // pause and play a tune while temps being gathered
+  splashtune();
+  lcd.setCursor(0,1);
+  lcd.print(F("Off     ")); // Start 'Off'
 }
 
 void mydelay(unsigned long d) {
@@ -119,7 +123,7 @@ char getpress(int waitTime) {
   return c;
 }
 
-void lightsontune() {
+void splashtune() {
   // Adapted from the 'Nokia Ringtone' sketch found at:
   // https://github.com/robsoncouto/arduino-songs
   int melody[] = {
@@ -146,11 +150,10 @@ void lightsontune() {
     tone(buzzer, melody[thisNote], noteDuration * 0.9);
     mydelay(noteDuration);
     noTone(buzzer);
-    lcd.print('.'); //animate on the start screen
   }
-
 }
-void lightsofftune() {
+
+void lightsontune() {
   // Adapted from the 'Star trek Intro' sketch found at:
   // https://github.com/robsoncouto/arduino-songs
   int melody[] = {
@@ -176,38 +179,61 @@ void lightsofftune() {
     tone(buzzer, melody[thisNote], noteDuration * 0.9);
     mydelay(noteDuration);
     noTone(buzzer);
-    lcd.print('.'); //animate on the start screen
   }
 }
 
+#define FASTRATE 1000
 void cycleOn(int del) {
-  Serial.println(F("Coming On: "));  
+  int stepval=1;
+  Serial.println(F("Coming On: ")); 
+  lcd.setCursor(0,1);
+  lcd.print(F("     "));
+  lightsontune(); 
   lcd.setCursor(0,1);
   lcd.write(byte(0)); // 'up' sysmbol we defined in setup()
   lcd.print(F("     "));
-  Serial.println(F("Red: "));
+  Serial.print(F("Red: "));
   for (int a = 0; a <= 255; a++) {
     analogWrite(RED,a);
     redVal=a;
-    mydelay(del);
+    mydelay(del/stepval);
+    if (!digitalRead(USERSWITCH)) {
+      while(!digitalRead(USERSWITCH)) mydelay(1);
+      stepval=FASTRATE;
+      Serial.print(F("Speedup: "));
+      tone(buzzer, NOTE_D4, 300);
+      mydelay(300);
+      noTone(buzzer);
+
+    }
     showTemp();
   }
   lcd.setCursor(1,1);
   lcd.write(byte(0)); // 'up' sysmbol we defined in setup()
-  Serial.println(F("Green: "));
+  Serial.print(F("Green: "));
   for (int a = 0; a <= 255; a++) {
     analogWrite(GREEN,a);
     greenVal=a;
-    mydelay(del);
+    mydelay(del/stepval);
+    if (!digitalRead(USERSWITCH)) {
+      while(!digitalRead(USERSWITCH)) mydelay(1);
+      stepval=FASTRATE;
+      Serial.print(F("Speedup: "));
+    }
     showTemp();
   }
   lcd.setCursor(2,1);
   lcd.write(byte(0)); // 'up' sysmbol we defined in setup()
-  Serial.println(F("Blue: "));
+  Serial.print(F("Blue: "));
   for (int a = 0; a <= 255; a++) {
     analogWrite(BLUE,a);
     blueVal=a;
-    mydelay(del);
+    mydelay(del/stepval);
+    if (!digitalRead(USERSWITCH)) {
+      while(!digitalRead(USERSWITCH)) mydelay(1);
+      stepval=FASTRATE;
+      Serial.print(F("Speedup: "));
+    }
     showTemp();
   }
   Serial.println(F("On!"));
@@ -216,32 +242,48 @@ void cycleOn(int del) {
 }
 
 void cycleOff(int del) {
+  int stepval=1;
   Serial.println(F("Going Off: "));  
   lcd.setCursor(0,1);
   lcd.write(byte(1)); // 'down' sysmbol we defined in setup()
   lcd.print(F("     "));
-  Serial.println(F("Red: "));
+  Serial.print(F("Red: "));
   for (int a = 255; a >= 0; a--) {
     analogWrite(RED,a);
     redVal=a;
-    mydelay(del);
+    mydelay(del/stepval);
+    if (!digitalRead(USERSWITCH)) {
+      while(!digitalRead(USERSWITCH)) mydelay(1);
+      stepval=FASTRATE;
+      Serial.print(F("Speedup: "));
+    }
     showTemp();
   }
   lcd.setCursor(1,1);
   lcd.write(byte(1)); // 'down' sysmbol we defined in setup()
-  Serial.println(F("Green: "));
+  Serial.print(F("Green: "));
   for (int a = 255; a >= 0; a--) {
     analogWrite(GREEN,a);
     greenVal=a;
-    mydelay(del);
+    mydelay(del/stepval);
+    if (!digitalRead(USERSWITCH)) {
+      while(!digitalRead(USERSWITCH)) mydelay(1);
+      stepval=FASTRATE;
+      Serial.print(F("Speedup: "));
+    }
     showTemp();
   }
   lcd.setCursor(2,1);
   lcd.write(byte(1)); // 'down' sysmbol we defined in setup()
-  Serial.println(F("Blue: "));
+  Serial.print(F("Blue: "));
   for (int a = 255; a >= 0; a--) {
     analogWrite(BLUE,a);
-    mydelay(del);
+    mydelay(del/stepval);
+    if (!digitalRead(USERSWITCH)) {
+      while(!digitalRead(USERSWITCH)) mydelay(1);
+      stepval=FASTRATE;
+      Serial.print(F("Speedup: "));
+    }
     blueVal=a;
     showTemp();
   }
