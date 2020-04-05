@@ -3,14 +3,10 @@
 #include <DallasTemperature.h>
 
 #include "musicnotes.h"
+#include "glyphs.h"
 
 // 1602 display
 LiquidCrystal_I2C lcd(0x3F,16,2);  // set the LCD address to 0x3F for a 16 chars and 2 line display
-
-//  Some custom glyphs for the display
-static byte onGlyph[8] = { 0b00100,0b01110,0b11111,0b10101,0b00100,0b00100,0b00100,0b00100 };
-static byte offGlyph[8] = { 0b00100,0b00100,0b00100,0b00100,0b10101,0b11111,0b01110,0b00100 };
-static byte degreesGlyph[8] = { 0b00110,0b01001,0b01001,0b00110,0b00000,0b00000,0b00000,0b00000 };
 
 // Data wire is plugged into port 2 on the Arduino
 // COLLEGE: #define ONE_WIRE_BUS 2
@@ -23,9 +19,10 @@ OneWire oneWire(ONE_WIRE_BUS);
 // Pass our oneWire reference to Dallas Temperature.
 DallasTemperature sensors(&oneWire);
 
-// Assign address manually. 
-// COLLEGE: DeviceAddress tankThermometer  = { 0x10, 0x38, 0x4E, 0x2A, 0x03, 0x08, 0x00, 0x05 };
-DeviceAddress tankThermometer  = { 0x10, 0xD8, 0x24, 0x2B, 0x03, 0x08, 0x00, 0x0F };
+// Assign address manually. Maybe search and find in setup instead.
+// COLLEGE: DeviceAddress tankThermometer  = { 0x10, 0x38, 0x4E, 0x2A, 0x03, 0x08, 0x00, 0x05 }; // College tank
+DeviceAddress tankThermometer  = { 0x10, 0xD8, 0x24, 0x2B, 0x03, 0x08, 0x00, 0x0F }; // Breadboard
+bool tempSensor=true; // set false if no sensor..
 
 // Sound Setup
 // change this to make the sounds slower or faster
@@ -53,18 +50,19 @@ bool serialTemps = false; // Show temperature on serial port
 
 // Fan
 #define FAN 9 // Fan PWM on Digital 9
+byte fanVal = 0;  // current blue value
 
+float fanMinTemp = 24.5; // start at this temp
+float fanMaxTemp = 26.5; // max speed at this temp
+byte fanMinSpeed = 128; // turn on PWM value
+byte fanMaxSpeed = 255; // max pwm value
+
+// PWM 
 int timeScale; // Used to scale time readings when we adjust Timer0 multiplier
 
 void setup()
 {
-  // Serial
-  Serial.begin(19200);
-  
-  // OneWire temp sensors
-  sensors.begin();
-
-  // General IO Pins
+  // General IO Pins 
   pinMode(LIDSWITCH,INPUT_PULLUP);  // Lid switch to input & pull-up
   pinMode(USERSWITCH,INPUT_PULLUP); // User button to input & pull-up
   pinMode(RED,OUTPUT);              // PWM, RED led channel
@@ -74,8 +72,14 @@ void setup()
   analogWrite(RED,redVal);          // Set default
   analogWrite(GREEN,greenVal);      // Set default
   analogWrite(BLUE,blueVal);        // Set default
-  analogWrite(FAN,125);             // Defaulted to 50%
+  analogWrite(FAN,fanVal);          // Set default
   
+  // Serial
+  Serial.begin(19200);
+  
+  // OneWire temp sensors
+  sensors.begin();
+
     // PWM Prescaler to set PWM base frequency; avoids fan noise (whine) and make LED's smooth
   TCCR0B = TCCR0B & B11111000 | B00000010; // Timer0 (D5,D6) ~7.8 KHz
   timeScale = 8; // Adjusting Timer0 makes millis() and delay() run faster.
@@ -83,33 +87,42 @@ void setup()
   TCCR2B = TCCR2B & B11111000 | B00000001; // Timer2 (D3,D11) ~31.4 KHz
 
   // LCD
-  lcd.init(); // Start lcd up
-  lcd.noCursor(); // do not display cursor
-  lcd.backlight(); // light up
-  lcd.createChar(0, onGlyph);
+  lcd.init();                   // Start lcd up
+  lcd.noCursor();               // do not display cursor
+  lcd.backlight();              // light up
+  lcd.createChar(0, onGlyph);   // Define custom glyphs for up, down, degrees and fan settings.
   lcd.createChar(1, offGlyph);
   lcd.createChar(2, degreesGlyph); 
-  lcd.setCursor(0,0); 
-  lcd.print("Aqua328");    // Say Hello
+  lcd.createChar(3, fanGlyph); 
+  lcd.createChar(4, fan1Glyph); 
+  lcd.createChar(5, fan2Glyph); 
+  lcd.createChar(6, fan3Glyph); 
+  
+  lcd.setCursor(0,0);    // Say Hello
+  lcd.print("Aqua328");
   lcd.setCursor(0,1);
   lcd.print(F("Welcome!"));
 
 
-  // Greetings on serial port
-  Serial.println("Welcome to Aqua328");
-  Serial.println("https://github.com/easytarget/Aqua328-Software");
+  // Greetings on serial port too
+  Serial.println();
+  Serial.println(F("Welcome to Aqua328"));
+  Serial.println(F("https://github.com/easytarget/Aqua328-Software"));
 
   sensors.requestTemperatures(); // Send initial command to get temperatures
+  
   // pause and play a tune while temps being gathered
   splashtune();
   lcd.setCursor(0,1);
-  lcd.print(F("Off     ")); // Start 'Off'
+  lcd.print(F("Off     ")); // Start with lights 'Off'
 }
 
+// Custom delay function that adjusts for the timescale
 void mydelay(unsigned long d) {
   delay(d*timeScale);
 }
 
+// Custom delay function that adjusts for the timescale
 unsigned long mymillis() {
   return (millis()/timeScale);
 }
@@ -123,7 +136,7 @@ char getpress(int waitTime) {
   return c;
 }
 
-void splashtune() {
+void lightsofftune() {
   // Adapted from the 'Nokia Ringtone' sketch found at:
   // https://github.com/robsoncouto/arduino-songs
   int melody[] = {
@@ -154,6 +167,37 @@ void splashtune() {
 }
 
 void lightsontune() {
+  int melody[] = {
+    // Pacman
+    // Score available at https://musescore.com/user/85429/scores/107109
+    NOTE_B4, 16, NOTE_B5, 16, NOTE_FS5, 16, NOTE_DS5, 16, //1
+    NOTE_B5, 32, NOTE_FS5, -16, NOTE_DS5, 8, NOTE_C5, 16,
+    NOTE_C6, 16, NOTE_G6, 16, NOTE_E6, 16, NOTE_C6, 32, NOTE_G6, -16, NOTE_E6, 8,
+  
+    NOTE_B4, 16,  NOTE_B5, 16,  NOTE_FS5, 16,   NOTE_DS5, 16,  NOTE_B5, 32,  //2
+    NOTE_FS5, -16, NOTE_DS5, 8,  NOTE_DS5, 32, NOTE_E5, 32,  NOTE_F5, 32,
+    NOTE_F5, 32,  NOTE_FS5, 32,  NOTE_G5, 32,  NOTE_G5, 32, NOTE_GS5, 32,  NOTE_A5, 16, NOTE_B5, 8
+  };
+  int notes = sizeof(melody) / sizeof(melody[0]) / 2;
+  int wholenote = (60000 * 4) / tempo;
+  int divider = 0, noteDuration = 0;
+
+  for (int thisNote = 0; thisNote < notes * 2; thisNote = thisNote + 2) {
+    divider = melody[thisNote + 1];
+    if (divider > 0) {
+      noteDuration = (wholenote) / divider;
+    } else if (divider < 0) {
+      noteDuration = (wholenote) / abs(divider);
+      noteDuration *= 1.5; // increases the duration in half for dotted notes
+    }
+    // we only play the note for 90% of the duration, leaving 10% as a pause
+    tone(buzzer, melody[thisNote], noteDuration * 0.9);
+    mydelay(noteDuration);
+    noTone(buzzer);
+  }
+}
+
+void splashtune() {
   // Adapted from the 'Star trek Intro' sketch found at:
   // https://github.com/robsoncouto/arduino-songs
   int melody[] = {
@@ -182,9 +226,21 @@ void lightsontune() {
   }
 }
 
-#define FASTRATE 1000
-void cycleOn(int del) {
-  int stepval=1;
+void buttonbeep() {
+  tone(buzzer, NOTE_D4, 150);
+  mydelay(150);
+  noTone(buzzer);
+}
+
+void notifybeep(int beeps) {
+  for (int i=1; i <= beeps; i++) {
+    tone(buzzer, NOTE_B4, 100);
+    mydelay(200);
+    noTone(buzzer);
+  }
+}
+
+void cycleOn(int del1, int del2) {
   Serial.println(F("Coming On: ")); 
   lcd.setCursor(0,1);
   lcd.print(F("     "));
@@ -193,106 +249,114 @@ void cycleOn(int del) {
   lcd.write(byte(0)); // 'up' sysmbol we defined in setup()
   lcd.print(F("     "));
   Serial.print(F("Red: "));
-  for (int a = 0; a <= 255; a++) {
+  for (int a=0; a <= 255; a++) {
     analogWrite(RED,a);
     redVal=a;
-    mydelay(del/stepval);
+    mydelay(del1);
     if (!digitalRead(USERSWITCH)) {
-      while(!digitalRead(USERSWITCH)) mydelay(1);
-      stepval=FASTRATE;
       Serial.print(F("Speedup: "));
-      tone(buzzer, NOTE_D4, 300);
-      mydelay(300);
-      noTone(buzzer);
-
+      buttonbeep();
+      while(!digitalRead(USERSWITCH)) mydelay(1);
+      del1=del2;
     }
     showTemp();
   }
   lcd.setCursor(1,1);
   lcd.write(byte(0)); // 'up' sysmbol we defined in setup()
   Serial.print(F("Green: "));
-  for (int a = 0; a <= 255; a++) {
+  for (int a=0; a <= 255; a++) {
     analogWrite(GREEN,a);
     greenVal=a;
-    mydelay(del/stepval);
+    mydelay(del1);
     if (!digitalRead(USERSWITCH)) {
-      while(!digitalRead(USERSWITCH)) mydelay(1);
-      stepval=FASTRATE;
       Serial.print(F("Speedup: "));
+      buttonbeep();
+      while(!digitalRead(USERSWITCH)) mydelay(1);
+      del1=del2;
     }
     showTemp();
   }
   lcd.setCursor(2,1);
   lcd.write(byte(0)); // 'up' sysmbol we defined in setup()
   Serial.print(F("Blue: "));
-  for (int a = 0; a <= 255; a++) {
+  for (int a=0; a <= 255; a++) {
     analogWrite(BLUE,a);
     blueVal=a;
-    mydelay(del/stepval);
+    mydelay(del1);
     if (!digitalRead(USERSWITCH)) {
-      while(!digitalRead(USERSWITCH)) mydelay(1);
-      stepval=FASTRATE;
       Serial.print(F("Speedup: "));
+      buttonbeep();
+      while(!digitalRead(USERSWITCH)) mydelay(1);
+      del1=del2;
     }
     showTemp();
   }
+
+  // Notify lights now on.
+  notifybeep(2);
   Serial.println(F("On!"));
   lcd.setCursor(0,1);
   lcd.print(F("On      "));
 }
 
-void cycleOff(int del) {
-  int stepval=1;
+void cycleOff(int del1, int del2) {
   Serial.println(F("Going Off: "));  
+  lightsofftune(); 
   lcd.setCursor(0,1);
   lcd.write(byte(1)); // 'down' sysmbol we defined in setup()
   lcd.print(F("     "));
   Serial.print(F("Red: "));
-  for (int a = 255; a >= 0; a--) {
+  for (int a=255; a >= 0; a--) {
     analogWrite(RED,a);
     redVal=a;
-    mydelay(del/stepval);
+    mydelay(del1);
     if (!digitalRead(USERSWITCH)) {
-      while(!digitalRead(USERSWITCH)) mydelay(1);
-      stepval=FASTRATE;
       Serial.print(F("Speedup: "));
+      buttonbeep();
+      while(!digitalRead(USERSWITCH)) mydelay(1);
+      del1=del2;
     }
     showTemp();
   }
   lcd.setCursor(1,1);
   lcd.write(byte(1)); // 'down' sysmbol we defined in setup()
   Serial.print(F("Green: "));
-  for (int a = 255; a >= 0; a--) {
+  for (int a=255; a >= 0; a--) {
     analogWrite(GREEN,a);
     greenVal=a;
-    mydelay(del/stepval);
+    mydelay(del1);
     if (!digitalRead(USERSWITCH)) {
-      while(!digitalRead(USERSWITCH)) mydelay(1);
-      stepval=FASTRATE;
       Serial.print(F("Speedup: "));
+      buttonbeep();
+      while(!digitalRead(USERSWITCH)) mydelay(1);
+      del1=del2;
     }
     showTemp();
   }
   lcd.setCursor(2,1);
   lcd.write(byte(1)); // 'down' sysmbol we defined in setup()
   Serial.print(F("Blue: "));
-  for (int a = 255; a >= 0; a--) {
+  for (int a=255; a >= 0; a--) {
     analogWrite(BLUE,a);
-    mydelay(del/stepval);
+    mydelay(del1);
     if (!digitalRead(USERSWITCH)) {
-      while(!digitalRead(USERSWITCH)) mydelay(1);
-      stepval=FASTRATE;
       Serial.print(F("Speedup: "));
+      buttonbeep();
+      while(!digitalRead(USERSWITCH)) mydelay(1);
+      del1=del2;
     }
     blueVal=a;
     showTemp();
   }
+
+  // Notify lights now off.
+  notifybeep(2);
   Serial.println(F("Off!"));
   lcd.setCursor(0,1);
   lcd.print(F("Off     "));
 }
 
-void showTemp() {
+float showTemp() {
   // Get the current reading
   float tankTemp = sensors.getTempC(tankThermometer);
   // Request a new temperature reading
@@ -307,29 +371,32 @@ void showTemp() {
   } else {
     lcd.print(F("Error"));
   }
+  return tankTemp;
+}
 
-  if (serialTemps) {
-    // Put a loop here to write this once per minute
-    Serial.print(F("Tank: "));
-    Serial.print(tankTemp);
-    Serial.print(char(194));
-    Serial.print(char(176));
-    Serial.print(F("C: Time: "));
-    Serial.print((float)mymillis()/1000,2);
-    Serial.print(F(": R: "));
-    Serial.print(redVal);
-    Serial.print(F(": G: "));
-    Serial.print(greenVal);
-    Serial.print(F(": B: "));
-    Serial.print(blueVal);
-    Serial.println();
-  }  
+byte setFan(float temp) {
+  // takes current temperature and maps that to a fan speed value (percentage)
+  // maps that speed to a value on the fans PWM speed range
+  // returns 0-4 indicating off, 25, 50, 75, 100% of the speed (for display)
+
+  // fanVal++;
+  byte fanPct = fanVal / 2.5;
+
+  analogWrite(FAN,fanVal);
+
+  // Return value determined from fanPct.
+  if (fanPct > 75) return(4);
+  else if (fanPct > 50) return(3);
+  else if (fanPct > 25) return(2);
+  else if (fanPct > 0) return(1);
+  else return(0);
 }
 
 // Main Loop
 
 int lightStatus = 0; // 0=off, 1=On
 bool buttonHit = false; // set to true when the button is hit
+float currentTemp = -127; // last successful temperature reading (-127 == no sensor)
 
 void loop()
 {  
@@ -337,6 +404,7 @@ void loop()
   if (!digitalRead(USERSWITCH)) { // switches are inverted..
     lcd.print(F("Button! "));
     Serial.print(F("Button: ")); 
+    while(!digitalRead(USERSWITCH)) mydelay(1); // debounce
     buttonHit = true; 
     }
   else if (!digitalRead(LIDSWITCH)) { // switches are inverted..
@@ -345,16 +413,16 @@ void loop()
     }
   else {
     // Restore display and check to see if the button has been pressed
-    lcd.print(F("Aqua328         "));
+    lcd.print(F("Aqua328       "));
     if (buttonHit) {
       buttonHit=false;
       if (lightStatus == 0) {
         // turn on
-        cycleOn(slowFadeRate);
+        cycleOn(slowFadeRate,fastFadeRate);
         lightStatus = 1;
       } else {
         // turn off 
-        cycleOff(slowFadeRate);
+        cycleOff(slowFadeRate,fastFadeRate);
         lightStatus = 0;
       }
     }
@@ -364,7 +432,52 @@ void loop()
   char ret = getpress(500);
 
   // Show the water temperature.
-  showTemp();
+  if (tempSensor) {
+    currentTemp = showTemp();
+
+    // Fan
+    lcd.setCursor(14,0);
+    switch ( setFan(currentTemp) ) {
+      case 1:
+        lcd.write(byte(3)); // 'fan' 
+        lcd.print(' '); // level 1, no symbol
+        break;
+      case 2:
+        lcd.write(byte(3)); // 'fan'
+        lcd.write(byte(4)); // level 2
+        break;
+      case 3:
+        lcd.write(byte(3)); // 'fan'
+        lcd.write(byte(5)); // level 3
+        break;
+      case 4:
+        lcd.write(byte(3)); // 'fan'
+        lcd.write(byte(6)); // level 4
+        break;
+      default:
+        lcd.print(F("  "));
+        break;
+    }
+  }
   
+  if (serialTemps) {
+  // Put a loop here to only write this once per minute
+  Serial.print(F("Tank: "));
+  Serial.print(currentTemp);
+  Serial.print(char(194));
+  Serial.print(char(176));
+  Serial.print(F("C: Time: "));
+  Serial.print((float)mymillis()/1000,2);
+  Serial.print(F(": R: "));
+  Serial.print(redVal);
+  Serial.print(F(": G: "));
+  Serial.print(greenVal);
+  Serial.print(F(": B: "));
+  Serial.print(blueVal);
+  Serial.print(F(": Fan: "));
+  Serial.print(fanVal);
+  Serial.println();
+  }
+
   // And loop back to the button/temp display
 }
