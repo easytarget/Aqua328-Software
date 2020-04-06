@@ -75,10 +75,10 @@ float fanMaxTemp = 26.5; // max speed at this temp
 byte fanMinSpeed = 128;  // min PWM value
 byte fanMaxSpeed = 255;  // max PWM value
 
-// PWM 
+// PWM adjustment
 int timeScale; // Used to scale time readings when we adjust Timer0 multiplier
 
-// Setup loop, initialise everything here
+// Setup; initialise everything here
 void setup()
 {
   // General IO Pins
@@ -175,7 +175,7 @@ bool firstOneWireDevice(void) {
     }
   }
   else {
-   Serial.print(F("No \'1-Wire\' device found: No temperature functions available"));
+   Serial.print(F("No OneWire devices found: No temperature functions available"));
    return false;
   }
   oneWire.reset_search();
@@ -436,8 +436,8 @@ float showTemp() {
 
 byte setFan(float temp) {
   // takes current temperature and maps that to a fan speed value (percentage)
-  // maps that speed to a value on the fans PWM speed range
-  // returns 0-4 indicating off, 25, 50, 75, 100% of the speed (for display)
+  // uses that percentage to set the fan PWM within the min and max pwm value range
+  // Returns 0-4 indicating off, 25, 50, 75, 100% of the speed (for display) respectively
 
   #ifndef FAN
     // No fan, no need to process this, returning zero will suppress display icons
