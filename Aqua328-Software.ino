@@ -1,3 +1,23 @@
+// Aquarium Light controller for an attended aquarium (no clock..)
+// Based on ATMega328P processor
+//
+// Following a 'WakeUp' button press (when the staff are opening the shop up) it will:
+//   - Slowly fade the lights up, Red, then Green/White, then Blue.
+//   - 8 Hours Later it will slowly fade the lights down in the same order.
+//
+// It continually monitors and reports the temperature on the display, the light 
+// and fan status is shown there too.
+// 
+// The fan briefly cycles during the day to refresh the ait under the tank lid
+// As the temperature rises between set limits the fan speed increases to provide cooling in summer.
+//
+// Additional button presses turn the lights on and off manually, speed the fade cycles up.
+//
+// Finally cheesy tunes entertain and delight; beeps feedback when the button is pressed
+
+// ToDo; lid sensor that dims lights and alerts with a tune.
+//       dimming the LCD via the spare (D11) pwm pin.
+
 #include <LiquidCrystal_I2C.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
@@ -8,8 +28,7 @@
 // 1602 display
 LiquidCrystal_I2C lcd(0x3F,16,2);  // set the LCD address to 0x3F for a 16 chars and 2 line display
 
-// Data wire is plugged into port 2 on the Arduino
-// COLLEGE: #define ONE_WIRE_BUS 2
+// OneWire on pin D2
 #define ONE_WIRE_BUS 2
 #define TEMPERATURE_PRECISION 9
 
@@ -19,24 +38,24 @@ OneWire oneWire(ONE_WIRE_BUS);
 // Pass our oneWire reference to Dallas Temperature.
 DallasTemperature sensors(&oneWire);
 
-// Assign address manually. Maybe search and find in setup instead.
+// Address for the temperature sensor will be found and assigned in setup, default to none
 DeviceAddress tankThermometer;
 bool tempSensor=false;
 
 // Sound Setup
 // change this to make the sounds slower or faster
 int tempo = 180;
-// change this to whichever pin you want to use
+// Buzzer/Speaker is connected to D10 (pwm)
 int buzzer = 10;
 
 // Switches
 #define LIDSWITCH 7 // digital pin D7
-#define USERSWITCH 8 // digital pin
+#define USERSWITCH 8 // digital pin D8
 
 // Lights
-#define RED 5   // Red LED PWM on Digital 5
-#define GREEN 6 // Red LED PWM on Digital 6
-#define BLUE 3  // Red LED PWM on Digital 3
+#define RED 5   // Red LED PWM on D5
+#define GREEN 6 // Red LED PWM on D6
+#define BLUE 3  // Red LED PWM on D3
 
 byte redVal = 0;   // current red value
 byte greenVal = 0; // current green value
@@ -44,21 +63,22 @@ byte blueVal = 0;  // current blue value
 
 int fastFadeRate = 30; // Rate (millis per step) for maintenance on/off cycle
 int slowFadeRate = 1500; // Rate (millis per step) for day on/off cycle
-bool serialTemps = false; // Show temperature on serial port
+bool serialTemps = false; // Show temperature on serial port (currently floods output)
  
 
-// Fan
-#define FAN 9 // Fan PWM on Digital 9
-byte fanVal = 0;  // current blue value
-
-float fanMinTemp = 24.5; // start at this temp
+// Fan 
+// Comment out the line below to disable fan.
+#define FAN 9            // Fan PWM on Digital 9
+byte fanVal = 0;         // Default to Off
+float fanMinTemp = 24.5; // min speed at this temp
 float fanMaxTemp = 26.5; // max speed at this temp
-byte fanMinSpeed = 128; // turn on PWM value
-byte fanMaxSpeed = 255; // max pwm value
+byte fanMinSpeed = 128;  // min PWM value
+byte fanMaxSpeed = 255;  // max PWM value
 
 // PWM 
 int timeScale; // Used to scale time readings when we adjust Timer0 multiplier
 
+// Setup loop, initialise everything here
 void setup()
 {
   // General IO Pins
@@ -67,11 +87,13 @@ void setup()
   pinMode(RED,OUTPUT);              // PWM, RED led channel
   pinMode(GREEN,OUTPUT);            // PWM, GREEN led channel
   pinMode(BLUE,OUTPUT);             // PWM, BLUE led channel
-  pinMode(FAN,OUTPUT);              // PWM, Fan
   analogWrite(RED,redVal);          // Set default
   analogWrite(GREEN,greenVal);      // Set default
   analogWrite(BLUE,blueVal);        // Set default
-  analogWrite(FAN,fanVal);          // Set default
+  #ifdef FAN
+    pinMode(FAN,OUTPUT);              // PWM, Fan
+    analogWrite(FAN,fanVal);          // Set default
+  #endif
 
   // Serial
   Serial.begin(19200);
@@ -87,17 +109,17 @@ void setup()
   TCCR1B = TCCR1B & B11111000 | B00000001; // Timer1 (D9,D10) ~31.4 KHz
   TCCR2B = TCCR2B & B11111000 | B00000001; // Timer2 (D3,D11) ~31.4 KHz
 
-  // LCD
+  // Display
   lcd.init();                   // Start lcd up
-  lcd.noCursor();               // do not display cursor
-  lcd.backlight();              // light up
+  lcd.noCursor();               // no cursor
+  lcd.backlight();              // lights on
   lcd.createChar(0, onGlyph);   // Define custom glyphs for up, down, degrees and fan settings.
   lcd.createChar(1, offGlyph);
   lcd.createChar(2, degreesGlyph);
-  lcd.createChar(3, fanGlyph);
-  lcd.createChar(4, fan1Glyph);
-  lcd.createChar(5, fan2Glyph);
-  lcd.createChar(6, fan3Glyph);
+  lcd.createChar(3, fanGlyph);  // Fan on/off
+  lcd.createChar(4, fan1Glyph); // Fan level 1
+  lcd.createChar(5, fan2Glyph); // fan level 2
+  lcd.createChar(6, fan3Glyph); // fan level 3
 
   lcd.setCursor(0,0);    // Say Hello
   lcd.print("Aqua328");
@@ -411,29 +433,37 @@ float showTemp() {
   else return -127;
 }
 
+
 byte setFan(float temp) {
   // takes current temperature and maps that to a fan speed value (percentage)
   // maps that speed to a value on the fans PWM speed range
   // returns 0-4 indicating off, 25, 50, 75, 100% of the speed (for display)
 
-  fanVal++;
-  byte fanPct = fanVal / 2.5;
-
-  analogWrite(FAN,fanVal);
-
-  // Return value determined from fanPct.
-  if (fanPct > 75) return(4);
-  else if (fanPct > 50) return(3);
-  else if (fanPct > 25) return(2);
-  else if (fanPct > 0) return(1);
-  else return(0);
+  #ifndef FAN
+    // No fan, no need to process this, returning zero will suppress display icons
+    fanVal = 0;
+    return 0;
+  #else
+    // We have a fan; process the temperature
+    fanVal++;
+    byte fanPct = fanVal / 2.5;
+  
+    analogWrite(FAN,fanVal);
+  
+    // Return value determined from fanPct.
+    if (fanPct > 75) return(4);
+    else if (fanPct > 50) return 3;
+    else if (fanPct > 25) return 2;
+    else if (fanPct > 0) return 1;
+    else return 0;
+  #endif
 }
 
 // Main Loop
 
 int lightStatus = 0; // 0=off, 1=On
 bool buttonHit = false; // set to true when the button is hit
-float currentTemp = -127; // last successful temperature reading (-127 == no sensor)
+float currentTemp = -127; // last successful reading (-127 == no sensor or other error)
 
 void loop()
 {
@@ -511,8 +541,10 @@ void loop()
   Serial.print(greenVal);
   Serial.print(F(": B: "));
   Serial.print(blueVal);
-  Serial.print(F(": Fan: "));
-  Serial.print(fanVal);
+  #ifdef FAN
+    Serial.print(F(": Fan: "));
+    Serial.print(fanVal);
+  #endif
   Serial.println();
   }
 
