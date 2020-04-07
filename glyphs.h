@@ -1,4 +1,6 @@
-//  Some custom glyphs for the display
+//  Some custom glyphs for the 1602 display
+// All my own work; yay!
+
 static byte onGlyph[8]      = { 0b00100,
                                 0b01110,
                                 0b11111,
@@ -61,9 +63,3 @@ static byte fan3Glyph[8]    = { 0b00001,
                                 0b00000,
                                 0b00000,
                                 0b00000 };
-
-
-//const byte fan1Glyph[8]    = { 0b00000,0b00000,0b00000,0b01000,0b00000,0b00000,0b00000,0b00000 };
-//const byte fan2Glyph[8]    = { 0b00000,0b00000,0b00100,0b01100,0b00100,0b00000,0b00000,0b00000 };
-//const byte fan3Glyph[8]    = { 0b00000,0b00010,0b00110,0b01110,0b00110,0b00010,0b00000,0b00000 };
-//const byte fan4Glyph[8]    = { 0b00001,0b00011,0b00111,0b01111,0b00111,0b00011,0b00001,0b00000 };
