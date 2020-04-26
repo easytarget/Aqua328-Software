@@ -4,13 +4,13 @@
 #define SPEAKER 10
 
 // OneWire on pin D2
-// #define ONE_WIRE_BUS 4         //  <---- BREADBOARD
-#define ONE_WIRE_BUS 2
+#define ONE_WIRE_BUS 4         //  <---- BREADBOARD
+//#define ONE_WIRE_BUS 2
 #define TEMPERATURE_PRECISION 9
 
 // Switches
-#define LIDSWITCH 7 // digital pin D7
-#define USERSWITCH 8 // digital pin D8
+#define LIDSWITCH 7  // active low on digital pin D7
+#define USERSWITCH 8 // active low on digital pin D8
 
 // Lights
 #define RED 5   // Red LED PWM on D5
@@ -19,8 +19,9 @@
 
 // Fan 
 // Comment out the line below to disable fan.
-#define FAN 9            // Fan PWM on D9
+#define FAN 9          // Fan PWM on D9
 
 // Misc:
+#define BACKLIGHT 11   // Display Backlight PWM on D11
 // A4 and A5 are used for SDA and SCL on the I2C bus (default)
 // D0 and D1 are used by serial and FTDI (default)

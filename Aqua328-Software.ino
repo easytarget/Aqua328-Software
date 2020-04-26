@@ -14,9 +14,10 @@
 // Additional button presses turn the lights on and off manually, speed the fade cycles up.
 //
 // Finally cheesy tunes entertain and delight; beeps feedback when the button is pressed
-
-// ToDo; lid sensor that dims lights and alerts with a tune.
-//       dimming the LCD via the spare (D11) pwm pin.
+//
+//  ToDo; lid sensor that dims lights and alerts with a tune.
+//        dimming the LCD via the spare (D11) pwm pin.
+//        much better state machine for the main loop
 
 #include <LiquidCrystal_I2C.h>
 #include <OneWire.h>
@@ -45,18 +46,19 @@ float currentTemp = -127; // last successful reading (-127 == no sensor or other
 int tempo = 180;
 
 // Lights
+byte blueVal = 0;  // current blue value
 byte redVal = 0;   // current red value
 byte greenVal = 0; // current green value
-byte blueVal = 0;  // current blue value
 int fastFadeRate = 30; // Rate (millis per step) for maintenance on/off cycle
-int slowFadeRate = 1500; // Rate (millis per step) for day on/off cycle 
+int slowFadeRate = 1500; // Rate (millis per step) for day on/off cycle
+byte blVal = 0;    // current backlight value
 
 // Fan 
 // Comment out the fan pin definition in pins.h to disable fan.
 byte fanVal = 0;         // Default to Off
-float fanMinTemp = 27.0; // min speed at this temp
+float fanMinTemp = 24.0; // min speed at this temp
 float fanMaxTemp = 28.5; // max speed at this temp
-byte fanMinSpeed = 128;  // min PWM value
+byte fanMinSpeed = 0;  // min PWM value
 byte fanMaxSpeed = 255;  // max PWM value
 
 // PWM adjustment
@@ -80,6 +82,8 @@ void setup()
   analogWrite(RED,redVal);          // Set default
   analogWrite(GREEN,greenVal);      // Set default
   analogWrite(BLUE,blueVal);        // Set default
+  pinMode(BACKLIGHT,OUTPUT);        // PWM, LCD Backlight led channel
+  analogWrite(BACKLIGHT,blVal);     // Set default
   #ifdef FAN
     pinMode(FAN,OUTPUT);              // PWM, Fan
     analogWrite(FAN,fanVal);          // Set default
@@ -117,17 +121,29 @@ void setup()
   lcd.setCursor(0,1);
   lcd.print(F("Welcome!"));
 
+
   // OneWire temp sensors
-  tempSensor = firstOneWireDevice(); // true if a sensorr is found
+  tempSensor = firstOneWireDevice(); // true if a sensor is found
   if (tempSensor) {
     sensors.begin();
     sensors.requestTemperatures(); // Send initial command to get temperatures
   }
 
+  for (blVal=0; blVal<=32; blVal++) {
+    analogWrite(BACKLIGHT,blVal);
+    mydelay(100);
+  }
+
   // pause and play a tune while temps being gathered
-  splashtune();
+  //splashtune();
+  notifybeep(3);
   lcd.setCursor(0,1);
   lcd.print(F("Off     ")); // Start with lights 'Off'
+
+  for (blVal=32; blVal<=128; blVal++) {
+    analogWrite(BACKLIGHT,blVal);
+    mydelay(100);
+  }
 }
 
 // Custom delay function that adjusts for the timescale
