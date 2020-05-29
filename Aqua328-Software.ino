@@ -29,7 +29,7 @@
 #include "Speaker.h"
 
 // 1602 display
-LiquidCrystal_I2C lcd(0x3F,16,2);  // set the LCD address to 0x3F for a 16 chars and 2 line display
+LiquidCrystal_I2C lcd(0x3F,16,2);  // set the LCD address to 0x3F, which is common for 1602 lcd display
 
 // Setup a OneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
 OneWire oneWire(ONE_WIRE_BUS);
@@ -43,7 +43,7 @@ bool tempSensor=false;
 float currentTemp = -127; // last successful reading (-127 == no sensor or other error)
 
 // Sounds
-Speaker loudSpeaker(PIEZOSPEAKER_PIN_SIG);
+Speaker loudSpeaker(SPEAKER_PIN);
 
 // Lights
 byte blueVal = 0;  // current blue value
@@ -286,14 +286,14 @@ void lightsofftune() {
 
 void buttonbeep(int beeps) {
   for (int i=1; i <= beeps; i++) {
-    TimerFreeTone(PIEZOSPEAKER_PIN_SIG, NOTE_D4, 120);
+    TimerFreeTone(SPEAKER_PIN, NOTE_D4, 120);
     mydelay(250);
   }
 }
 
 void notifybeep(int beeps) {
   for (int i=1; i <= beeps; i++) {
-    TimerFreeTone(PIEZOSPEAKER_PIN_SIG, NOTE_B4, 70);
+    TimerFreeTone(SPEAKER_PIN, NOTE_B4, 70);
     mydelay(200);
   }
 }

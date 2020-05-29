@@ -1,7 +1,7 @@
 // Physical pin and other hardware attribute settings
 
 // Speaker is on PWM pin D10 
-#define PIEZOSPEAKER_PIN_SIG 10
+#define SPEAKER_PIN 10
 
 // OneWire on pin D2
 #define ONE_WIRE_BUS 4         //  <---- BREADBOARD
