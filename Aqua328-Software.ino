@@ -23,9 +23,10 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
-#include "pins.h"
-#include "musicnotes.h"
-#include "glyphs.h"
+#include "Pins.h"
+#include "Glyphs.h"
+#include "TimerFreeTone.h"
+#include "Speaker.h"
 
 // 1602 display
 LiquidCrystal_I2C lcd(0x3F,16,2);  // set the LCD address to 0x3F for a 16 chars and 2 line display
@@ -37,28 +38,30 @@ OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 
 // Dallas OneWire temperature Sensor
-DeviceAddress tankThermometer;
-bool tempSensor=false;
+DeviceAddress tankThermometer;  // we will search for the address during setup
+bool tempSensor=false; 
 float currentTemp = -127; // last successful reading (-127 == no sensor or other error)
 
 // Sounds
-// change this to make the sounds slower or faster
-int tempo = 180;
+Speaker loudSpeaker(PIEZOSPEAKER_PIN_SIG);
 
 // Lights
 byte blueVal = 0;  // current blue value
 byte redVal = 0;   // current red value
 byte greenVal = 0; // current green value
-int fastFadeRate = 30; // Rate (millis per step) for maintenance on/off cycle
+
+int fastFadeRate = 1; // Rate (millis per step) for maintenance on/off cycle
 int slowFadeRate = 1500; // Rate (millis per step) for day on/off cycle
-byte blVal = 0;    // current backlight value
+byte lcdVal = 0;    // current backlight value
+byte lcdOn  = 255;  // lcd backlight when lights on
+byte lcdOff = 32;   // lcd backlight when lights off
 
 // Fan 
 // Comment out the fan pin definition in pins.h to disable fan.
 byte fanVal = 0;         // Default to Off
-float fanMinTemp = 24.0; // min speed at this temp
-float fanMaxTemp = 28.5; // max speed at this temp
-byte fanMinSpeed = 0;  // min PWM value
+float fanMinTemp = 26.5; // min speed at this temp
+float fanMaxTemp = 27.5; // max speed at this temp
+byte fanMinSpeed = 96;  // min PWM value
 byte fanMaxSpeed = 255;  // max PWM value
 
 // PWM adjustment
@@ -83,14 +86,14 @@ void setup()
   analogWrite(GREEN,greenVal);      // Set default
   analogWrite(BLUE,blueVal);        // Set default
   pinMode(BACKLIGHT,OUTPUT);        // PWM, LCD Backlight led channel
-  analogWrite(BACKLIGHT,blVal);     // Set default
+  analogWrite(BACKLIGHT,lcdVal);     // Set default
   #ifdef FAN
     pinMode(FAN,OUTPUT);              // PWM, Fan
     analogWrite(FAN,fanVal);          // Set default
   #endif
 
   // Serial
-  Serial.begin(19200);
+  Serial.begin(57600);
 
   // Greetings on serial port
   Serial.println();
@@ -129,20 +132,21 @@ void setup()
     sensors.requestTemperatures(); // Send initial command to get temperatures
   }
 
-  for (blVal=0; blVal<=32; blVal++) {
-    analogWrite(BACKLIGHT,blVal);
-    mydelay(100);
+  for (lcdVal=0; lcdVal < lcdOn; lcdVal++) {
+    analogWrite(BACKLIGHT,lcdVal);
+    mydelay(10);
   }
 
-  // pause and play a tune while temps being gathered
-  //splashtune();
-  notifybeep(3);
-  lcd.setCursor(0,1);
-  lcd.print(F("Off     ")); // Start with lights 'Off'
+  // play a tune
+  splashtune();
 
-  for (blVal=32; blVal<=128; blVal++) {
-    analogWrite(BACKLIGHT,blVal);
-    mydelay(100);
+  // Go into initial 'off' state
+  mydelay(333);
+  lcd.setCursor(0,1);
+  lcd.print(F("Off     "));
+  for (lcdVal=lcdOn; lcdVal > lcdOff; lcdVal--) {
+    analogWrite(BACKLIGHT,lcdVal);
+    mydelay(1);
   }
 }
 
@@ -150,7 +154,9 @@ void setup()
 void mydelay(unsigned long d) {
   delay(d*timeScale);
 }
-
+void mydelayMicroseconds(unsigned long d) {
+  delayMicroseconds(d*timeScale);
+}
 // Custom delay function that adjusts for the timescale
 unsigned long mymillis() {
   return (millis()/timeScale);
@@ -238,9 +244,9 @@ byte fanMinSpeed = 128;  // min PWM value
 byte fanMaxSpeed = 255;  // max PWM value*/
     byte fan;
     float newVal = fanMinSpeed + (temp - fanMinTemp) * ((fanMaxSpeed-fanMinSpeed)/(fanMaxTemp-fanMinTemp));
-    if (newVal < fanMinSpeed) fan = 0; // fully off 
-    else if (newVal > fanMaxSpeed) fan = fanMaxSpeed; // fullspeed
-    else fan = floor(newVal);
+    if (newVal < fanMinSpeed) fan = 0;  // fully off 
+    else if (newVal > fanMaxSpeed) fan = fanMaxSpeed;  // fully on
+    else fan = floor(newVal);  // in-between values
   
     analogWrite(FAN,fan);
 
@@ -252,110 +258,44 @@ byte fanMaxSpeed = 255;  // max PWM value*/
  * SOUNDS
  */
 
-void lightsofftune() {
-  // Adapted from the 'Nokia Ringtone' sketch found at:
-  // https://github.com/robsoncouto/arduino-songs
-  int melody[] = {
-    // Nokia Ringtone 
-    // Score available at https://musescore.com/user/29944637/scores/5266155
-    NOTE_E5, 8, NOTE_D5, 8, NOTE_FS4, 4, NOTE_GS4, 4,
-    NOTE_CS5, 8, NOTE_B4, 8, NOTE_D4, 4, NOTE_E4, 4,
-    NOTE_B4, 8, NOTE_A4, 8, NOTE_CS4, 4, NOTE_E4, 4,
-    NOTE_A4, 2, 
-  };
-  int notes = sizeof(melody) / sizeof(melody[0]) / 2;
-  int wholenote = (60000 * 4) / tempo;
-  int divider = 0, noteDuration = 0;
-
-  for (int thisNote = 0; thisNote < notes * 2; thisNote = thisNote + 2) {
-    divider = melody[thisNote + 1];
-    if (divider > 0) {
-      noteDuration = (wholenote) / divider;
-    } else if (divider < 0) {
-      noteDuration = (wholenote) / abs(divider);
-      noteDuration *= 1.5; // increases the duration in half for dotted notes
-    }
-    // we only play the note for 90% of the duration, leaving 10% as a pause
-    tone(SPEAKER, melody[thisNote], noteDuration * 0.9);
-    mydelay(noteDuration);
-    noTone(SPEAKER);
-  }
+void splashtune() {
+  // 'Hurrah!' Tune from the PlayMelody examples
+  unsigned int Length      = 6;
+  unsigned int Melody[]    = {NOTE_C4, NOTE_E4, NOTE_G4, NOTE_C5, NOTE_G4, NOTE_C5};
+  unsigned int Durations[] = {8      , 8      , 8      , 4      , 8      , 4      };
+  loudSpeaker.playMelody(Length, Melody, Durations); 
 }
 
 void lightsontune() {
-  int melody[] = {
-    // Pacman
-    // Score available at https://musescore.com/user/85429/scores/107109
-    NOTE_B4, 16, NOTE_B5, 16, NOTE_FS5, 16, NOTE_DS5, 16, //1
-    NOTE_B5, 32, NOTE_FS5, -16, NOTE_DS5, 8, NOTE_C5, 16,
-    NOTE_C6, 16, NOTE_G6, 16, NOTE_E6, 16, NOTE_C6, 32, NOTE_G6, -16, NOTE_E6, 8,
-  
-    NOTE_B4, 16,  NOTE_B5, 16,  NOTE_FS5, 16,   NOTE_DS5, 16,  NOTE_B5, 32,  //2
-    NOTE_FS5, -16, NOTE_DS5, 8,  NOTE_DS5, 32, NOTE_E5, 32,  NOTE_F5, 32,
-    NOTE_F5, 32,  NOTE_FS5, 32,  NOTE_G5, 32,  NOTE_G5, 32, NOTE_GS5, 32,  NOTE_A5, 16, NOTE_B5, 8
-  };
-  int notes = sizeof(melody) / sizeof(melody[0]) / 2;
-  int wholenote = (60000 * 4) / tempo;
-  int divider = 0, noteDuration = 0;
-
-  for (int thisNote = 0; thisNote < notes * 2; thisNote = thisNote + 2) {
-    divider = melody[thisNote + 1];
-    if (divider > 0) {
-      noteDuration = (wholenote) / divider;
-    } else if (divider < 0) {
-      noteDuration = (wholenote) / abs(divider);
-      noteDuration *= 1.5; // increases the duration in half for dotted notes
-    }
-    // we only play the note for 90% of the duration, leaving 10% as a pause
-    tone(SPEAKER, melody[thisNote], noteDuration * 0.9);
-    mydelay(noteDuration);
-    noTone(SPEAKER);
-  }
-}
-
-void splashtune() {
   // Adapted from the 'Star trek Intro' sketch found at:
   // https://github.com/robsoncouto/arduino-songs
-  int melody[] = {
-  // Star Trek Intro
-  // Score available at https://musescore.com/user/10768291/scores/4594271
-    NOTE_D4, -8, NOTE_G4, 16, NOTE_C5, -4,
-    NOTE_B4, 8, NOTE_G4, -16, NOTE_E4, -16, NOTE_A4, -16,
-    NOTE_D5, 2,
-  };
-  int notes = sizeof(melody) / sizeof(melody[0]) / 2;
-  int wholenote = (60000 * 4) / tempo;
-  int divider = 0, noteDuration = 0;
+  unsigned int Length      = 8;
+  unsigned int Melody[]    = {NOTE_D4, NOTE_G4, NOTE_C5, NOTE_B4, NOTE_G4, NOTE_E4, NOTE_A4, NOTE_D5};
+  unsigned int Durations[] = {12     , 16     , 6      , 8      , 12     , 12     , 12     , 2 };
+  loudSpeaker.playMelody(Length, Melody, Durations); 
+}
 
-  for (int thisNote = 0; thisNote < notes * 2; thisNote = thisNote + 2) {
-    divider = melody[thisNote + 1];
-    if (divider > 0) {
-      noteDuration = (wholenote) / divider;
-    } else if (divider < 0) {
-      noteDuration = (wholenote) / abs(divider);
-      noteDuration *= 1.5; // increases the duration in half for dotted notes
-    }
-    // we only play the note for 90% of the duration, leaving 10% as a pause
-    tone(SPEAKER, melody[thisNote], noteDuration * 0.9);
-    mydelay(noteDuration);
-    noTone(SPEAKER);
-  }
+void lightsofftune() {
+  // Adapted from the 'Nokia Ringtone' sketch found at:
+  // https://github.com/robsoncouto/arduino-songs
+  unsigned int Length      = 13;
+  unsigned int Melody[]    = {NOTE_E5, NOTE_D5, NOTE_FS4, NOTE_GS4, NOTE_CS5, NOTE_B4, NOTE_D4, NOTE_E4, NOTE_B4, NOTE_A4, NOTE_CS4, NOTE_E4, NOTE_A4};
+  unsigned int Durations[] = {8, 8, 4, 4, 8, 8, 4, 4, 8, 8, 4, 4, 2};
+  loudSpeaker.playMelody(Length, Melody, Durations); 
 }
 
 void buttonbeep(int beeps) {
   for (int i=1; i <= beeps; i++) {
-    tone(SPEAKER, NOTE_D4, 150);
+    TimerFreeTone(PIEZOSPEAKER_PIN_SIG, NOTE_D4, 120);
     mydelay(250);
   }
-  noTone(SPEAKER);
 }
 
 void notifybeep(int beeps) {
   for (int i=1; i <= beeps; i++) {
-    tone(SPEAKER, NOTE_B4, 100);
+    TimerFreeTone(PIEZOSPEAKER_PIN_SIG, NOTE_B4, 70);
     mydelay(200);
   }
-  noTone(SPEAKER);
 }
 
 void logState() {
@@ -388,6 +328,10 @@ void logState() {
  */
  
 void cycleOn(int del1, int del2) {
+  for (lcdVal=lcdOff; lcdVal < lcdOn; lcdVal++) {
+    analogWrite(BACKLIGHT,lcdVal);
+    mydelay(1);
+  }
   Serial.println(F("Lights: Turning On"));
   lcd.setCursor(0,1);
   lcd.print(F("     "));
@@ -501,6 +445,10 @@ void cycleOff(int del1, int del2) {
   lcd.setCursor(0,1);
   lcd.print(F("Off     "));
   Serial.println(F("Lights: Off"));
+  for (lcdVal=lcdOn; lcdVal > lcdOff; lcdVal--) {
+    analogWrite(BACKLIGHT,lcdVal);
+    mydelay(1);
+  }
 }
 
 /*

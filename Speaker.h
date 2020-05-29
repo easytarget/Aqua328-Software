@@ -1,11 +1,34 @@
-/* 
-  Silly tunes in the Aqua328 come courtesy of:
+#ifndef _SPEAKER_H_
+#define _SPEAKER_H_
 
-   https://github.com/robsoncouto/arduino-songs
-   - Robson Couto, 2019
-   
-   More songs available at that location.
-*/
+/*
+  BaseSpeaker is an abstract class used to provide common interace
+  an funcionality for different speaker components
+  This library contains parts from https://www.arduino.cc/en/Tutorial/toneMelody
+ */
+class Speaker
+{
+  public:
+    Speaker(const int pin);
+    void tone(unsigned long frequency, unsigned int duration);
+    // Play a Melody
+    // len           - amount of notes in melody
+    // melody        - array where each element is the desired note in sequence
+    // noteDurations - array where each element defines the duration for the corresponding note in the melody.
+    //                 4 = quarter note, 8 = eighth note, etc.
+    // both melody and noteDurations must be arrays of length len.
+    void playMelody(unsigned int len, unsigned int *notes, unsigned int *durations);
+
+  private:
+    int m_pin;
+};
+
+
+/*************************************************
+ * https://www.arduino.cc/en/Tutorial/toneMelody
+ * Public Constants
+ *************************************************/
+
 #define NOTE_B0  31
 #define NOTE_C1  33
 #define NOTE_CS1 35
@@ -95,4 +118,5 @@
 #define NOTE_CS8 4435
 #define NOTE_D8  4699
 #define NOTE_DS8 4978
-#define REST      0
+
+#endif // _SPEAKER_H_
