@@ -68,7 +68,9 @@ byte fanMaxSpeed = 255;  // max PWM value
 int timeScale; // Used to scale time readings when we adjust Timer0 multiplier
 
 // Debug
-bool serialTemps = false; // Show temperature on serial port (lots of output)
+#define LOGINTERVAL 60000    // log once per minute
+bool serialTemps = false;   // Show temperature on serial port
+unsigned long lastLog = 0;  // timstamp
 
 /*
  * SETUP
@@ -201,13 +203,14 @@ bool firstOneWireDevice(void) {
 
 char getpress(int waitTime) {
   unsigned long start = mymillis();
-  while(!Serial.available() && (start+waitTime) <= mymillis()) {
+  while(!Serial.available() && (mymillis() - start <= waitTime)) {
     mydelay(10);
   }
   char c = Serial.read();
   return c;
 }
 
+// Gets a temperature reading and displays it.
 float showTemp() {
   if (tempSensor) {
     // Get the current reading
@@ -232,26 +235,47 @@ float showTemp() {
 byte setFan(float temp) {
   // takes current temperature and maps that to a fan speed value (percentage)
   // uses that percentage to set the fan PWM within the min and max pwm value range
-  // Returns 0-4 indicating off, 25, 50, 75, 100% of the speed (for display) respectively
+  // Displays icons showing fan state
 
-  #ifndef FAN
-    // No fan, no need to process this, returning zero will suppress display icons
-    return 0;
-  #else
-    // We have a fan; process the temperature
-/*
-byte fanMinSpeed = 128;  // min PWM value
-byte fanMaxSpeed = 255;  // max PWM value*/
-    byte fan;
-    float newVal = fanMinSpeed + (temp - fanMinTemp) * ((fanMaxSpeed-fanMinSpeed)/(fanMaxTemp-fanMinTemp));
-    if (newVal < fanMinSpeed) fan = 0;  // fully off 
-    else if (newVal > fanMaxSpeed) fan = fanMaxSpeed;  // fully on
-    else fan = floor(newVal);  // in-between values
-  
+  byte fan = 0;
+ 
+  #ifdef FAN
+    if (temp == -127) fan = 0;  // sensor failure
+    else {
+      // We have a fan; process the temperature
+      float newVal = fanMinSpeed + (temp - fanMinTemp) * ((fanMaxSpeed-fanMinSpeed)/(fanMaxTemp-fanMinTemp));
+      if (newVal < fanMinSpeed) fan = 0;  // fully off 
+      else if (newVal > fanMaxSpeed) fan = fanMaxSpeed;  // fully on
+      else fan = floor(newVal);  // in-between values
+    }
     analogWrite(FAN,fan);
-
-    return fan;
   #endif
+
+  // Show fan icons
+  int fanSpeedStep = (fanMaxSpeed - fanMinSpeed) / 4;
+  lcd.setCursor(14,0);
+  if (fan >= fanMinSpeed + fanSpeedStep*3) {
+    lcd.write(byte(3)); // 'fan'
+    lcd.write(byte(6)); // level 4
+  } 
+  else if (fan >= fanMinSpeed + fanSpeedStep*2) {
+    lcd.write(byte(3)); // 'fan'
+    lcd.write(byte(5)); // level 3
+  }
+  else if (fan >= fanMinSpeed + fanSpeedStep) {
+    lcd.write(byte(3)); // 'fan'
+    lcd.write(byte(4)); // level 2
+  }
+  else if (fan >= fanMinSpeed) {
+    lcd.write(byte(3)); // 'fan'
+    lcd.print(' '); // level 1, no symbol
+  }
+  else {
+    lcd.print(F("  ")); // We are off
+  }
+
+  return fan;
+
 }
 
 /*
@@ -308,8 +332,6 @@ void logState() {
     Serial.print(char(176));
     Serial.print(F("C: "));
   }
-  Serial.print(F("Time: "));
-  Serial.print((float)mymillis()/1000,0);
   Serial.print(F(": R: "));
   Serial.print(redVal);
   Serial.print(F(": G: "));
@@ -320,6 +342,8 @@ void logState() {
     Serial.print(F(": Fan: "));
     Serial.print(fanVal);
   #endif
+  Serial.print(F(": Time: "));
+  Serial.print((float)mymillis()/1000,0);
   Serial.println();
 }
 
@@ -502,35 +526,15 @@ void loop()
   if (tempSensor) {
     // Get the temperature (and display at same time)
     currentTemp = showTemp(); 
-    
     // Fan
     fanVal = setFan(currentTemp);
-    int fanSpeedStep = (fanMaxSpeed - fanMinSpeed) / 4;
-    lcd.setCursor(14,0);
-    if (fanVal >= fanMinSpeed + fanSpeedStep*3) {
-      lcd.write(byte(3)); // 'fan'
-      lcd.write(byte(6)); // level 4
-    } 
-    else if (fanVal >= fanMinSpeed + fanSpeedStep*2) {
-      lcd.write(byte(3)); // 'fan'
-      lcd.write(byte(5)); // level 3
-    }
-    else if (fanVal >= fanMinSpeed + fanSpeedStep) {
-      lcd.write(byte(3)); // 'fan'
-      lcd.write(byte(4)); // level 2
-    }
-    else if (fanVal >= fanMinSpeed) {
-      lcd.write(byte(3)); // 'fan'
-      lcd.print(' '); // level 1, no symbol
-    }
-    else {
-      lcd.print(F("  ")); // No fan display since we are off
-    }
   }
 
   if (serialTemps) {
-  // Put a loop here to only log once per minute/second
-    logState();
+    if ((mymillis() - lastLog) >= LOGINTERVAL) {  // more than a minute
+      logState();
+      lastLog = mymillis();
+    }
   }
 
   // And loop back to the button/temp display
