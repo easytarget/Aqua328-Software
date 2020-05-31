@@ -343,7 +343,8 @@ void lightsofftune() {
   // Adapted from the 'Nokia Ringtone' sketch found at:
   // https://github.com/robsoncouto/arduino-songs
   unsigned int Length      = 13;
-  unsigned int Melody[]    = {NOTE_E5, NOTE_D5, NOTE_FS4, NOTE_GS4, NOTE_CS5, NOTE_B4, NOTE_D4, NOTE_E4, NOTE_B4, NOTE_A4, NOTE_CS4, NOTE_E4, NOTE_A4};
+  unsigned int Melody[]    = {NOTE_E5, NOTE_D5, NOTE_FS4, NOTE_GS4, NOTE_CS5, NOTE_B4, NOTE_D4, NOTE_E4, 
+                              NOTE_B4, NOTE_A4, NOTE_CS4, NOTE_E4, NOTE_A4};
   unsigned int Durations[] = {8, 8, 4, 4, 8, 8, 4, 4, 8, 8, 4, 4, 2};
   loudSpeaker.playMelody(Length, Melody, Durations); 
 }

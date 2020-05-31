@@ -4,8 +4,8 @@
 #define SPEAKER_PIN 10
 
 // OneWire on pin D2
-#define ONE_WIRE_BUS 4         //  <---- BREADBOARD
-//#define ONE_WIRE_BUS 2
+//#define ONE_WIRE_BUS 4         //  <---- BREADBOARD (AdaFruit Trinket)
+#define ONE_WIRE_BUS 2
 #define TEMPERATURE_PRECISION 9
 
 // Switches
