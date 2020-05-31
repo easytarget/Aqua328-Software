@@ -45,35 +45,48 @@ float currentTemp = -127; // last successful reading (-127 == no sensor or other
 // Sounds
 Speaker loudSpeaker(SPEAKER_PIN);
 
-// Lights
-byte blueVal = 0;  // current blue value
-byte redVal = 0;   // current red value
-byte greenVal = 0; // current green value
+// State Machine
+// Basic light cycle with fast modes, can add lit open states etc later.
+enum activityStates {Off, TurnOn, FastOn, On, TurnOff, FastOff};
 
-int fastFadeRate = 1; // Rate (millis per step) for maintenance on/off cycle
-int slowFadeRate = 1500; // Rate (millis per step) for day on/off cycle
-byte lcdVal = 0;    // current backlight value
-byte lcdOn  = 255;  // lcd backlight when lights on
-byte lcdOff = 32;   // lcd backlight when lights off
+// Note: I try to keep all values below as dynamic variables (not defines) so that adding eeprom and
+//       user setting of values (eg serial, jog dial, wifi, etc) becomes easier to implement later
+
+// Lights
+byte blueVal = 0;
+byte redVal = 0;
+byte greenVal = 0;
+enum activityStates ledState = Off; // State, start as 'Off'
+
+
+// Timing
+unsigned long changeTime  =  1800000; // Full LED change (off-on or on-off) in ms (30 mins)
+unsigned long cycleTime   = 27000000; // daytime lights on period in ms (7 hrs 30 mins)
+// TODO unsigned long pulseTime  =  1800000; // Gap between fan pulses in ms (20 mins) (4x slower when off)
+unsigned int readTime     = 333; // delay between temperature readings in ms
 
 // Fan 
 // Comment out the fan pin definition in pins.h to disable fan.
-byte fanVal = 0;         // Default to Off
-float fanMinTemp = 26.5; // min speed at this temp
-float fanMaxTemp = 27.5; // max speed at this temp
-byte fanMinSpeed = 96;  // min PWM value
-byte fanMaxSpeed = 255;  // max PWM value
+byte fanVal = 0;          // Default to Off
+float fanMinTemp = 26.5;  // min speed at this temp
+float fanMaxTemp = 27.5;  // max speed at this temp
+byte fanMinSpeed = 96;    // min PWM value
+byte fanMaxSpeed = 255;   // max PWM value
 
-// PWM adjustment
-int timeScale; // Used to scale time readings when we adjust Timer0 multiplier
+// User Interface
+int buttonDelay = 200;      // Button hold down delay (debounce and anti-tap)
+byte lcdOn  = 255;          // lcd backlight when lights on
+byte lcdOff = 32;           // lcd backlight when lights off
 
-// Debug
-#define LOGINTERVAL 60000    // log once per minute
-bool serialTemps = false;   // Show temperature on serial port
-unsigned long lastLog = 0;  // timstamp
+// PWM frequency (timer0) adjustment
+int timeScale;  // Used to scale time readings when we adjust Timer0 multiplier
+
+// Logging
+unsigned long logInterval = 60000;  // log once per minute
+bool serialLog = false;         // Show temperature on serial port
 
 /*
- * SETUP
+ * Setup and initialisation
  */
 
 void setup()
@@ -81,17 +94,17 @@ void setup()
   // General IO Pins
   pinMode(LIDSWITCH,INPUT_PULLUP);  // Lid switch to input & pull-up
   pinMode(USERSWITCH,INPUT_PULLUP); // User button to input & pull-up
-  pinMode(RED,OUTPUT);              // PWM, RED led channel
-  pinMode(GREEN,OUTPUT);            // PWM, GREEN led channel
-  pinMode(BLUE,OUTPUT);             // PWM, BLUE led channel
+  pinMode(RED,OUTPUT);              // PWM: RED led channel
+  pinMode(GREEN,OUTPUT);            // PWM: GREEN led channel
+  pinMode(BLUE,OUTPUT);             // PWM: BLUE led channel
   analogWrite(RED,redVal);          // Set default
   analogWrite(GREEN,greenVal);      // Set default
   analogWrite(BLUE,blueVal);        // Set default
-  pinMode(BACKLIGHT,OUTPUT);        // PWM, LCD Backlight led channel
-  analogWrite(BACKLIGHT,lcdVal);     // Set default
+  pinMode(BACKLIGHT,OUTPUT);        // PWM: LCD Backlight led channel
+  analogWrite(BACKLIGHT,0);         // Set default
   #ifdef FAN
-    pinMode(FAN,OUTPUT);              // PWM, Fan
-    analogWrite(FAN,fanVal);          // Set default
+    pinMode(FAN,OUTPUT);            // PWM: Fan
+    analogWrite(FAN,fanVal);        // Set default
   #endif
 
   // Serial
@@ -116,7 +129,7 @@ void setup()
   lcd.createChar(0, onGlyph);   // Define custom glyphs for up, down, degrees and fan settings.
   lcd.createChar(1, offGlyph);
   lcd.createChar(2, degreesGlyph);
-  lcd.createChar(3, fanGlyph);  // Fan on/off
+  lcd.createChar(3, fanGlyph);  // Fan symbol
   lcd.createChar(4, fan1Glyph); // Fan level 1
   lcd.createChar(5, fan2Glyph); // fan level 2
   lcd.createChar(6, fan3Glyph); // fan level 3
@@ -126,7 +139,6 @@ void setup()
   lcd.setCursor(0,1);
   lcd.print(F("Welcome!"));
 
-
   // OneWire temp sensors
   tempSensor = firstOneWireDevice(); // true if a sensor is found
   if (tempSensor) {
@@ -134,40 +146,43 @@ void setup()
     sensors.requestTemperatures(); // Send initial command to get temperatures
   }
 
-  for (lcdVal=0; lcdVal < lcdOn; lcdVal++) {
+  for (int lcdVal=0; lcdVal < lcdOn; lcdVal++) {
     analogWrite(BACKLIGHT,lcdVal);
     mydelay(10);
   }
 
   // play a tune
   splashtune();
+  mydelay(333);
 
   // Go into initial 'off' state
-  mydelay(333);
-  lcd.setCursor(0,1);
-  lcd.print(F("Off     "));
-  for (lcdVal=lcdOn; lcdVal > lcdOff; lcdVal--) {
+  setLED(0);
+  for (int lcdVal=lcdOn; lcdVal > lcdOff; lcdVal--) {
     analogWrite(BACKLIGHT,lcdVal);
     mydelay(1);
   }
 }
 
-// Custom delay function that adjusts for the timescale
+/* 
+ *  Utility Functions
+ */
+
+// Custom millisecond delay() function that adjusts for the timescale
 void mydelay(unsigned long d) {
   delay(d*timeScale);
 }
+
+// Custom microsecond delay() function that adjusts for the timescale
 void mydelayMicroseconds(unsigned long d) {
   delayMicroseconds(d*timeScale);
 }
-// Custom delay function that adjusts for the timescale
+
+// Custom millis() function that adjusts for the timescale
 unsigned long mymillis() {
   return (millis()/timeScale);
 }
 
-/* 
- *  FUNCTIONS
- */
-
+// Search the oneWire interface for a sensor. If found, set the device address
 bool firstOneWireDevice(void) {
   byte i;
   byte present = 0;
@@ -197,48 +212,50 @@ bool firstOneWireDevice(void) {
    Serial.print(F("No OneWire devices found: No temperature functions available"));
    return false;
   }
-  oneWire.reset_search();
+  oneWire.reset_search();  // stop searching
   return true;
 }
 
-char getpress(int waitTime) {
+// Wait for specified time while checking for serial input, acts as main delay in the loop
+char getSerial(unsigned int waitTime) {
   unsigned long start = mymillis();
   while(!Serial.available() && (mymillis() - start <= waitTime)) {
-    mydelay(10);
+    mydelay(1);
   }
   char c = Serial.read();
   return c;
 }
 
-// Gets a temperature reading and displays it.
-float showTemp() {
+// Get a temperature reading and displays it.
+float readTemp() {
+  float tankTemp = -127;
   if (tempSensor) {
     // Get the current reading
-    float tankTemp = sensors.getTempC(tankThermometer);
+    tankTemp = sensors.getTempC(tankThermometer);
     // Request a new temperature reading
     sensors.requestTemperatures();
-
-    // Display the results
-    lcd.setCursor(11,1);
-    if (tankTemp != -127) {
-      lcd.print(tankTemp,1);
-      lcd.write(byte(2));    // 'degrees' sysmbol we defined in setup()
-      lcd.print(F("  "));
-    } else {
-      lcd.print(F("Error"));
-    }
-    return tankTemp;
   }
-  else return -127;
+  return tankTemp;
 }
 
-byte setFan(float temp) {
-  // takes current temperature and maps that to a fan speed value (percentage)
-  // uses that percentage to set the fan PWM within the min and max pwm value range
-  // Displays icons showing fan state
+// Display temperature reading
+void showTemp(float temp) {
+  // Display the temperature
+  lcd.setCursor(11,1);
+  if (temp != -127) {
+    lcd.print(temp,1);
+    lcd.write(byte(2));    // 'degrees' sysmbol we defined in setup()
+    lcd.print(F("  "));
+  } else {
+    lcd.print(F("Error"));
+  }
+}
 
+
+// Take supplied temperature and maps that to the fan PWM pin as needed
+byte setFan(float temp) {
   byte fan = 0;
- 
+  // use temperature to calculate PWM value proportionally within the min and max range
   #ifdef FAN
     if (temp == -127) fan = 0;  // sensor failure
     else {
@@ -250,8 +267,7 @@ byte setFan(float temp) {
     }
     analogWrite(FAN,fan);
   #endif
-
-  // Show fan icons
+  // Show fan icons, rather crude logic and maths but hey! it works ;-)
   int fanSpeedStep = (fanMaxSpeed - fanMinSpeed) / 4;
   lcd.setCursor(14,0);
   if (fan >= fanMinSpeed + fanSpeedStep*3) {
@@ -271,15 +287,39 @@ byte setFan(float temp) {
     lcd.print(' '); // level 1, no symbol
   }
   else {
-    lcd.print(F("  ")); // We are off
+    lcd.print(F("  ")); // We are off, or no fan
   }
-
   return fan;
+}
 
+// Serial logging 
+void logState() {
+  Serial.print(F("Tank: "));
+  if (!tempSensor) Serial.print(F("No Sensor: "));
+  else if (currentTemp == -127) Serial.print(F("Sensor Error: "));
+  else {
+    Serial.print(currentTemp,2);
+    Serial.print(char(194));
+    Serial.print(char(176));
+    Serial.print(F("C"));
+  }
+  Serial.print(F(": R: "));
+  Serial.print(redVal);
+  Serial.print(F(": G: "));
+  Serial.print(greenVal);
+  Serial.print(F(": B: "));
+  Serial.print(blueVal);
+  #ifdef FAN
+    Serial.print(F(": Fan: "));
+    Serial.print(fanVal);
+  #endif
+  //Serial.print(F(": Countdown: "));
+  //Serial.print((float)mymillis()/1000,0);
+  Serial.println();
 }
 
 /*
- * SOUNDS
+ * Feedback
  */
 
 void splashtune() {
@@ -308,234 +348,181 @@ void lightsofftune() {
   loudSpeaker.playMelody(Length, Melody, Durations); 
 }
 
-void buttonbeep(int beeps) {
+// Long beeps
+void buttonBeep(int beeps) {
   for (int i=1; i <= beeps; i++) {
     TimerFreeTone(SPEAKER_PIN, NOTE_D4, 120);
     mydelay(250);
   }
 }
 
-void notifybeep(int beeps) {
+// Short beeps
+void notifyBeep(int beeps) {
   for (int i=1; i <= beeps; i++) {
     TimerFreeTone(SPEAKER_PIN, NOTE_B4, 70);
     mydelay(200);
   }
 }
 
-void logState() {
-  Serial.print(F("Tank: "));
-  if (!tempSensor) Serial.print(F("No Sensor: "));
-  else if (currentTemp == -127) Serial.print(F("Sensor Error: "));
-  else {
-    Serial.print(currentTemp,2);
-    Serial.print(char(194));
-    Serial.print(char(176));
-    Serial.print(F("C: "));
-  }
-  Serial.print(F(": R: "));
-  Serial.print(redVal);
-  Serial.print(F(": G: "));
-  Serial.print(greenVal);
-  Serial.print(F(": B: "));
-  Serial.print(blueVal);
-  #ifdef FAN
-    Serial.print(F(": Fan: "));
-    Serial.print(fanVal);
-  #endif
-  Serial.print(F(": Time: "));
-  Serial.print((float)mymillis()/1000,0);
-  Serial.println();
-}
-
-/*
- * LOOPS
- */
- 
-void cycleOn(int del1, int del2) {
-  for (lcdVal=lcdOff; lcdVal < lcdOn; lcdVal++) {
+// Announce turn on
+void cycleOn() {
+  Serial.println(F("Lights: Turning On"));
+  lightsontune();
+  for (int lcdVal=lcdOff; lcdVal < lcdOn; lcdVal++) {
     analogWrite(BACKLIGHT,lcdVal);
     mydelay(1);
   }
-  Serial.println(F("Lights: Turning On"));
-  lcd.setCursor(0,1);
-  lcd.print(F("     "));
-  lightsontune();
-  lcd.setCursor(0,1);
-  lcd.write(byte(0)); // 'up' sysmbol we defined in setup()
-  lcd.print(F("     "));
-  Serial.println(F("Red: Fading Up"));
-  for (int a=0; a <= 255; a++) {
-    analogWrite(RED,a);
-    redVal=a;
-    mydelay(del1);
-    if (!digitalRead(USERSWITCH)) {
-      Serial.println(F("Speedup:"));
-      buttonbeep(1);
-      while(!digitalRead(USERSWITCH)) mydelay(1);
-      del1=del2;
-    }
-    showTemp();
-  }
-  lcd.setCursor(1,1);
-  lcd.write(byte(0)); // 'up' sysmbol we defined in setup()
-  Serial.println(F("Green: Fading Up"));
-  for (int a=0; a <= 255; a++) {
-    analogWrite(GREEN,a);
-    greenVal=a;
-    mydelay(del1);
-    if (!digitalRead(USERSWITCH)) {
-      Serial.println(F("Speedup:"));
-      buttonbeep(1);
-      while(!digitalRead(USERSWITCH)) mydelay(1);
-      del1=del2;
-    }
-    showTemp();
-  }
-  lcd.setCursor(2,1);
-  lcd.write(byte(0)); // 'up' sysmbol we defined in setup()
-  Serial.println(F("Blue: Fading Up"));
-  for (int a=0; a <= 255; a++) {
-    analogWrite(BLUE,a);
-    blueVal=a;
-    mydelay(del1);
-    if (!digitalRead(USERSWITCH)) {
-      Serial.println(F("Speedup:"));
-      buttonbeep(1);
-      while(!digitalRead(USERSWITCH)) mydelay(1);
-      del1=del2;
-    }
-    showTemp();
-  }
-
-  // Notify lights now on.
-  notifybeep(2);
-  lcd.setCursor(0,1);
-  lcd.print(F("On      "));
-  Serial.println(F("Lights: On"));
 }
 
-void cycleOff(int del1, int del2) {
+// Announce turn off
+void cycleOff() {
   Serial.println(F("Lights: Turning Off"));
   lightsofftune();
-  lcd.setCursor(0,1);
-  lcd.write(byte(1)); // 'down' sysmbol we defined in setup()
-  lcd.print(F("     "));
-  Serial.println(F("Red: Fading Down"));
-  for (int a=255; a >= 0; a--) {
-    analogWrite(RED,a);
-    redVal=a;
-    mydelay(del1);
-    if (!digitalRead(USERSWITCH)) {
-      Serial.println(F("Speedup:"));
-      buttonbeep(1);
-      while(!digitalRead(USERSWITCH)) mydelay(1);
-      del1=del2;
-    }
-    showTemp();
-  }
-  lcd.setCursor(1,1);
-  lcd.write(byte(1)); // 'down' sysmbol we defined in setup()
-  Serial.println(F("Green: Fading Down"));
-  for (int a=255; a >= 0; a--) {
-    analogWrite(GREEN,a);
-    greenVal=a;
-    mydelay(del1);
-    if (!digitalRead(USERSWITCH)) {
-      Serial.println(F("Speedup:"));
-      buttonbeep(1);
-      while(!digitalRead(USERSWITCH)) mydelay(1);
-      del1=del2;
-    }
-    showTemp();
-  }
-  lcd.setCursor(2,1);
-  lcd.write(byte(1)); // 'down' sysmbol we defined in setup()
-  Serial.println(F("Blue: Fading Down"));
-  for (int a=255; a >= 0; a--) {
-    analogWrite(BLUE,a);
-    mydelay(del1);
-    if (!digitalRead(USERSWITCH)) {
-      Serial.println(F("Speedup:"));
-      buttonbeep(1);
-      while(!digitalRead(USERSWITCH)) mydelay(1);
-      del1=del2;
-    }
-    blueVal=a;
-    showTemp();
-  }
-
-  // Notify lights now off.
-  notifybeep(2);
-  lcd.setCursor(0,1);
-  lcd.print(F("Off     "));
-  Serial.println(F("Lights: Off"));
-  for (lcdVal=lcdOn; lcdVal > lcdOff; lcdVal--) {
+  for (int lcdVal=lcdOn; lcdVal > lcdOff; lcdVal--) {
     analogWrite(BACKLIGHT,lcdVal);
     mydelay(1);
   }
+}
+
+// LED level setting and feedback
+void setLED(int level) {
+  byte pInd = '?';
+  if ((ledState == TurnOn) || (ledState == FastOn)) pInd = 0; // up
+  if ((ledState == TurnOff) || (ledState == FastOff)) pInd = 1; // down
+  lcd.setCursor(0,1);
+  if (level == 0) {
+    redVal = 0;
+    greenVal = 0;
+    blueVal = 0;
+    lcd.print(F("Off"));
+    Serial.println(F("Lights: Off"));
+  } else if (level < 256) {
+    redVal = level;
+    greenVal = 0;
+    blueVal = 0;
+    lcd.write(pInd);
+  } else if (level < 512) {
+    redVal = 255;
+    greenVal = level - 256;
+    blueVal = 0;
+    lcd.write(pInd);
+    lcd.write(pInd);
+ } else if (level < 767) {
+    redVal = 255;
+    greenVal = 255;
+    blueVal = level - 512;
+    lcd.write(pInd);
+    lcd.write(pInd);
+    lcd.write(pInd);
+  } else {
+    redVal = 255;
+    greenVal = 255;
+    blueVal = 255;
+    lcd.print(F("On"));
+    Serial.println(F("Lights: On"));
+  }
+  lcd.print(F("      "));
+  analogWrite(RED,redVal);
+  analogWrite(GREEN,greenVal);
+  analogWrite(BLUE,blueVal);
 }
 
 /*
  * Main Control loop
+ * states are: {Off, TurnOn, FastOn, On, TurnOff, FastOff}
  */
 
-int lightStatus = 0; // 0=off, 1=On
-bool buttonHit = false; // set to true when the button is hit
+int loopDelay = 50;                     // Basic 'tempo' of the state machine loop
+int ledLevel = 0;                       // Total level (R+G+B) 
+int ledTotal = 767;                     // Maximum brightness 
+int slowStep = changeTime / ledTotal;   // Millis per step in slow change mode
+unsigned long lastChange = mymillis();  // last time we changed light
+unsigned long buttonStart = 0;          // positive press timer for button
+unsigned long lastRead = mymillis();    // temperature read timer
+//TODO unsigned long lastPulse = 0;          // fan pulse timer
+unsigned long lastLog = 0;              // log timer
 
-void loop()
-{
+void loop() {
+  unsigned long loopStart = mymillis();  // Note when we started.
+
+  // Show the water temperature.
+  if (tempSensor && ((mymillis() - lastRead) > readTime)) {
+    // Get the temperature (and display at same time)
+    currentTemp = readTemp();
+    lastRead = mymillis();
+    showTemp(currentTemp);
+    fanVal = setFan(currentTemp);
+  }
+
+  // LEDs
+  int newLevel = ledLevel;
+  switch (ledState) {
+    case Off: newLevel = 0; break;
+    case TurnOn: if (mymillis() - lastChange > slowStep) newLevel++; break;
+    case FastOn: newLevel+= 10; break;
+    case On: newLevel = ledTotal; break;
+    case TurnOff: if (mymillis() - lastChange > slowStep) newLevel--; break;
+    case FastOff: newLevel-= 10; break;
+  }
+  newLevel = constrain(newLevel, 0, ledTotal);
+  // Set new level only if it is changed
+  if (newLevel != ledLevel) {
+    lastChange = mymillis();
+    ledLevel = newLevel;
+    setLED(ledLevel);
+  }
+  // Change state when limits are reached
+  if ((newLevel == ledTotal) && (ledState != On) && (ledState != TurnOff)) {
+    ledState = On;
+    notifyBeep(2);
+  } 
+  if ((newLevel == 0) && (ledState != Off) && (ledState != TurnOn)) {
+    ledState = Off;
+    notifyBeep(2);
+  }
+
+  // test if button or lid has been activated
+  bool button = false;
   lcd.setCursor(0,0);
   if (!digitalRead(USERSWITCH)) { // switches are inverted..
     lcd.print(F("Button! "));
     Serial.println(F("Button: pressed"));
-    while(!digitalRead(USERSWITCH)) mydelay(1); // debounce
-    buttonHit = true;
-    }
+    while(!digitalRead(USERSWITCH)) mydelay(1); // simple hold
+    button = true;
+  }
   else if (!digitalRead(LIDSWITCH)) { // switches are inverted..
     lcd.print(F("Lid! "));
     Serial.println(F("Lid: opened"));
     // Do more here once lid switch hardware is in place; 
-    // Eg: notify and dim lights
-    }
-  else {
-    // Restore display and check to see if the button has been pressed
-    lcd.print(F("Aqua328       "));
-    if (buttonHit) {
-      buttonHit=false;
-      if (lightStatus == 0) {
-        // turn on
-        cycleOn(slowFadeRate,fastFadeRate);
-        lightStatus = 1;
-      } else {
-        // turn off 
-        cycleOff(slowFadeRate,fastFadeRate);
-        lightStatus = 0;
-      }
-    }
+    // Eg: notify and dim lights, set feeding timer, etc..
   }
 
-  // Hold for one second here, processing serial and buttons
-  switch ( getpress(500) ) {
-    case 'l': serialTemps = true; Serial.println(F("Logging: On")); break;
-    case 'q': serialTemps = false; Serial.println(F("Logging: Off")); break;
-    case 'i': logState(); break;
-    case 'b': buttonHit = true; break;
-  }
+  // Display
+  lcd.setCursor(0,0);
+  lcd.print(F("Aqua328       "));
 
-  // Show the water temperature.
-  if (tempSensor) {
-    // Get the temperature (and display at same time)
-    currentTemp = showTemp(); 
-    // Fan
-    fanVal = setFan(currentTemp);
-  }
-
-  if (serialTemps) {
-    if ((mymillis() - lastLog) >= LOGINTERVAL) {  // more than a minute
+  if (serialLog) {
+    if ((mymillis() - lastLog) >= logInterval) {  // more than a minute
       logState();
       lastLog = mymillis();
     }
   }
 
-  // And loop back to the button/temp display
-}
+  // Primary loop delay here, processing serial
+  switch ( getSerial(loopDelay) ) {
+    case 'l': serialLog = true; Serial.println(F("Log: On")); break;
+    case 'q': serialLog = false; Serial.println(F("Log: Off")); break;
+    case 'i': logState(); break;
+    case 'b': button = true; break;  // Serial simulation of button
+  }
+
+    // Process button actions according to state
+  if (button) {
+    switch (ledState) {
+      case Off: ledState = TurnOn; cycleOn(); break;
+      case TurnOn: ledState = FastOn; buttonBeep(1); Serial.println(F("Speedup")); break;
+      case On: ledState = TurnOff; cycleOff(); break;
+      case TurnOff: ledState = FastOff; buttonBeep(1); Serial.println(F("Speedup")); break;
+    }
+  }
+}  // Fin
