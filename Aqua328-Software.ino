@@ -148,10 +148,10 @@ void setup()
 
   for (int lcdVal=0; lcdVal < lcdOn; lcdVal++) {
     analogWrite(BACKLIGHT,lcdVal);
-    mydelay(10);
+    mydelay(1);
   }
 
-  // play a tune
+  // play a tune while first sensor reading is taken etc.
   splashtune();
   mydelay(333);
 
@@ -182,7 +182,7 @@ unsigned long mymillis() {
   return (millis()/timeScale);
 }
 
-// Search the oneWire interface for a sensor. If found, set the device address
+// Search the oneWire interface for first sensor. If found, set the device address
 bool firstOneWireDevice(void) {
   byte i;
   byte present = 0;
@@ -331,21 +331,20 @@ void splashtune() {
 }
 
 void lightsontune() {
-  // Adapted from the 'Star trek Intro' sketch found at:
-  // https://github.com/robsoncouto/arduino-songs
+  // Adapted from the 'windowsXP startup' score found at:
+  // https://pianoletternotes.blogspot.com/2017/10/windows-xp-startup-and-shutdown-sounds.html
   unsigned int Length      = 8;
-  unsigned int Melody[]    = {NOTE_D4, NOTE_G4, NOTE_C5, NOTE_B4, NOTE_G4, NOTE_E4, NOTE_A4, NOTE_D5};
-  unsigned int Durations[] = {12     , 16     , 6      , 8      , 12     , 12     , 12     , 2 };
+  unsigned int Melody[]    = {NOTE_D6, NOTE_NN, NOTE_D5, NOTE_A5, NOTE_G5, NOTE_D5, NOTE_D6, NOTE_A5};
+  unsigned int Durations[] = {4      , 8      , 8      , 4      , 4      , 4      , 4      , 4      };
   loudSpeaker.playMelody(Length, Melody, Durations); 
 }
 
 void lightsofftune() {
-  // Adapted from the 'Nokia Ringtone' sketch found at:
-  // https://github.com/robsoncouto/arduino-songs
-  unsigned int Length      = 13;
-  unsigned int Melody[]    = {NOTE_E5, NOTE_D5, NOTE_FS4, NOTE_GS4, NOTE_CS5, NOTE_B4, NOTE_D4, NOTE_E4, 
-                              NOTE_B4, NOTE_A4, NOTE_CS4, NOTE_E4, NOTE_A4};
-  unsigned int Durations[] = {8, 8, 4, 4, 8, 8, 4, 4, 8, 8, 4, 4, 2};
+  // Adapted from the 'windowsXP shutdown' score found at:
+  // https://pianoletternotes.blogspot.com/2017/10/windows-xp-startup-and-shutdown-sounds.html
+  unsigned int Length      = 4;
+  unsigned int Melody[]    = {NOTE_G6, NOTE_D6, NOTE_G5, NOTE_A5};
+  unsigned int Durations[] = {6,       6,       6,       6};
   loudSpeaker.playMelody(Length, Melody, Durations); 
 }
 
