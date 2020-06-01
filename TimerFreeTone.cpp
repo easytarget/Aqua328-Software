@@ -12,7 +12,7 @@ uint8_t _tft_volume[] = { 255, 200, 150, 125, 100, 87, 50, 33, 22, 2 }; // Duty 
 
 void TimerFreeTone(uint8_t pin, unsigned long frequency, unsigned int duration, uint8_t volume) {
 	if (frequency == 0 || volume == 0) { // If frequency or volume are zero, just wait duration and exit.
-		mydelay(duration);
+		myDelay(duration);
 		return;
 	} 
 	frequency = 1000000 / frequency;                              // Calculate the square wave length (in microseconds).
@@ -26,8 +26,8 @@ void TimerFreeTone(uint8_t pin, unsigned long frequency, unsigned int duration, 
 	pinMode(pin, OUTPUT);                                                       // Set pin to output mode.
 #endif
 
-	uint32_t startTime = mymillis();           // Starting time of note.
-	while(mymillis() - startTime < duration) { // Loop for the duration.
+	uint32_t startTime = millis();           // Starting time of note.
+	while(millis() - startTime < (duration * timeScale)) { // Loop for the duration.
 	#ifdef __AVR__
 		*pinOutput |= pinBit;    // Set pin high.
 		delayMicroseconds(duty); // Square wave duration (how long to leave pin high).
