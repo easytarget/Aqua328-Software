@@ -8,16 +8,15 @@
 // It continually monitors and reports the temperature on the display, the light 
 // and fan status is shown there too.
 // 
-// The fan briefly cycles during the day to refresh the ait under the tank lid
+// The fan briefly cycles during the day to refresh the air under the tank lid
 // As the temperature rises between set limits the fan speed increases to provide cooling in summer.
 //
-// Additional button presses turn the lights on and off manually, speed the fade cycles up.
+// Additional button presses turn the lights on and off manually, and speed the fade cycles up.
 //
 // Finally cheesy tunes entertain and delight; beeps feedback when the button is pressed
 //
 //  ToDo; lid sensor that dims lights and alerts with a tune.
-//        dimming the LCD via the spare (D11) pwm pin.
-//        much better state machine for the main loop
+//        feeding reminder linked to lid sensor
 
 #include <LiquidCrystal_I2C.h>
 #include <OneWire.h>
@@ -48,6 +47,7 @@ Speaker loudSpeaker(SPEAKER_PIN);
 // State Machine
 // Basic light cycle with fast modes, can add lit open states etc later.
 enum activityStates {Off, TurnOn, FastOn, On, TurnOff, FastOff};
+int loopTime = 100; // Minimum loop time (ms)
 
 // Lights
 byte blueVal = 0;
@@ -117,7 +117,7 @@ void setup()
   Serial.println(F("Commands: v - logging, i - status, b - button"));
   Serial.println();
 
-  // PWM Prescaler to set PWM base frequency; avoids fan noise (whine) and make LED's smooth
+  // PWM Prescaler to set PWM base frequency; avoids fan noise (whine) and LED flicker
   TCCR0B = TCCR0B & B11111000 | B00000010; // Timer0 (D5,D6) ~7.8 KHz
   timeScale = 8; // Adjusting Timer0 makes millis() and delay() run faster.
   TCCR1B = TCCR1B & B11111000 | B00000001; // Timer1 (D9,D10) ~31.4 KHz
@@ -250,8 +250,15 @@ byte setFan(float temp) {
       else fan = floor(newVal);  // in-between values
     }
     analogWrite(FAN,fan);
+    if ((fan == 0) && (fanVal > 0)) {
+      logTime();
+      Serial.println(F("Fan: Stopped"));
+    } else if ((fan > 0) && (fanVal == 0)) {
+      logTime();
+      Serial.println(F("Fan: Started"));
+    } 
   #endif
-  // Show fan icons, rather crude logic and maths but hey! it works ;-)
+  // Show fan icons if running, rather crude logic and maths but hey! it works ;-)
   int fanSpeedStep = (fanMaxSpeed - fanMinSpeed) / 4;
   lcd.setCursor(14,0);
   if (fan >= fanMinSpeed + fanSpeedStep*3) {
@@ -297,7 +304,7 @@ void logTime() {
 // Serial logging 
 void logState() {
   logTime();
-  Serial.print(F("Tank: "));
+  Serial.print(F("Log: Tank: "));
   if (!tempSensor) Serial.print(F("No Sensor: "));
   else if (currentTemp == -127) Serial.print(F("Sensor Error: "));
   else {
@@ -369,11 +376,11 @@ void notifyBeep(int beeps) {
 void cycleOn() {
   logTime();
   Serial.println(F("Lights: Turning On"));
-  lightsontune();
   for (int lcdVal=lcdOff; lcdVal < lcdOn; lcdVal++) {
     analogWrite(BACKLIGHT,lcdVal);
     myDelay(1);
   }
+  lightsontune();
 }
 
 // Announce turn off
@@ -422,7 +429,7 @@ void setLED(int level) {
     redVal = 255;
     greenVal = 255;
     blueVal = 255;
-    lcd.print(F("On"));
+    lcd.print(F("      "));
     logTime();
     Serial.println(F("Lights: On"));
   }
@@ -437,7 +444,6 @@ void setLED(int level) {
  * states are: {Off, TurnOn, FastOn, On, TurnOff, FastOff}
  */
 
-int loopTime = 100;                     // Minimum loop time (ms)
 int ledLevel = 0;                       // LED level (R+G+B) 
 int ledTotal = 767;                     // Maximum brightness 
 int slowStep = changeTime / ledTotal;   // Millis per step in slow change mode
@@ -480,7 +486,7 @@ void loop() {
       lcd.write(byte(7));
     } 
   }
-  else lastPulse = millis();  // holds pulses off when fan auto
+  else lastPulse = millis();  // holds pulses off when fan is otherwise on
 
   // LEDs
   int newLevel = ledLevel;
@@ -491,22 +497,25 @@ void loop() {
     case On: {
         newLevel = ledTotal;
         char num [4];
-        unsigned long l = floor(((lastChange+(dayCycleTime*timeScale))-millis())/1000/timeScale);
+        long l = ((lastChange+(dayCycleTime*timeScale))-millis());
+        l = constrain(l,0,dayCycleTime*timeScale);
+        l = floor(l/1000/timeScale);
         int s = l%60;
         int m = int(floor(l/60))%60;
-        int h = floor(l/3600);
-        strcpy(banner,"Off ");
+        int h = int(floor(l/3600))%100;
+        lcd.setCursor(0,1);
         sprintf (num, "%u", h);
-        strcat(banner,num);
-        strcat(banner,":");
+        lcd.print(num);
+        lcd.print(':');
         sprintf (num, "%02u", m);
-        strcat(banner,num);
-        strcat(banner,":");
+        lcd.print(num);
+        lcd.print(':');
         sprintf (num, "%02u", s);
-        strcat(banner,num);
+        lcd.print(num);
+        lcd.print(' ');
         if (millis()-lastChange > (dayCycleTime*timeScale)) {
           logTime();
-          Serial.println(F("Auto Off"));
+          Serial.println(F("Auto: Turn Off"));
           ledState = TurnOff; 
           cycleOff(); 
         }  
@@ -546,7 +555,7 @@ void loop() {
           }
         } break;
       case 'i': logState(); break;
-      case 'b': button = true; logTime(); Serial.println(F("Serial Button")); break;
+      case 'b': button = true; logTime(); Serial.println(F("Button: Serial")); break;
       //case 'l': Serial.println(F("Lid Open")); break;
       //case 'c': Serial.println(F("Lid Closed")); break;
     }
@@ -570,7 +579,7 @@ void loop() {
   else if (buttonStart != 0) {
     if ((millis() - buttonStart) > (buttonDelay * timeScale)) {  
       logTime();
-      Serial.println(F("Button pressed"));
+      Serial.println(F("Button: Pressed"));
       button = true;
     }
     buttonStart = 0;
@@ -578,10 +587,22 @@ void loop() {
   // Process button actions according to state
   if (button) {
     switch (ledState) {
-      case Off: ledState = TurnOn; cycleOn(); break;
-      case TurnOn: ledState = FastOn; buttonBeep(1); logTime(); Serial.println(F("Speedup")); break;
-      case On: ledState = TurnOff; cycleOff(); break;
-      case TurnOff: ledState = FastOff; buttonBeep(1); logTime(); Serial.println(F("Speedup")); break;
+      case Off:     ledState = TurnOn; 
+                    cycleOn(); 
+                    break;
+      case TurnOn:  ledState = FastOn; 
+                    buttonBeep(1); 
+                    logTime(); 
+                    Serial.println(F("Lights: Fast On")); 
+                    break;
+      case On:      ledState = TurnOff; 
+                    cycleOff(); 
+                    break;
+      case TurnOff: ledState = FastOff; 
+                    buttonBeep(1); 
+                    logTime(); 
+                    Serial.println(F("Lights: Fast Off")); 
+                    break;
     }
   }
 
@@ -589,7 +610,7 @@ void loop() {
   if (!digitalRead(LIDSWITCH)) { // switches are inverted..
     strcpy(banner, "Lid         ");
     logTime();
-    Serial.println(F("Lid: opened"));
+    Serial.println(F("Lid: Opened"));
     lid = true;
     // Do more here once lid switch hardware is in place; 
     // Eg: notify and dim lights, set feeding timer, etc..
