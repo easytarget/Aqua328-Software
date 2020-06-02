@@ -53,18 +53,17 @@ enum activityStates {Off, TurnOn, FastOn, On, TurnOff, FastOff};
 byte blueVal = 0;
 byte redVal = 0;
 byte greenVal = 0;
-enum activityStates ledState = Off; // State, start as 'Off'
+enum activityStates ledState = Off; // State, start 'Off'
+unsigned long lastChange = millis(); // last time we changed led level
 
 
 // Timing
-unsigned long changeTime     = 1800000; // Full LED change (off-on or on-off)
-unsigned long dayCycleTime   = 2700000; // daytime lights on period 
-//unsigned long onPulseTime    =  900000; // Gap between lights-on fan pulses
-//unsigned long offPulseTime   = 3600000; // Gap between lights-off fan pulses
-unsigned long onPulseTime    =   60000; // Gap between lights-on fan pulses
-unsigned long offPulseTime   =  120000; // Gap between lights-off fan pulses
-unsigned long pulseTime      =   20000; // Fan pulse length
-unsigned int readTime        =     333; // delay between temperature readings
+unsigned long changeTime     =  1800000; // Full LED change (off-on or on-off) (30m)
+unsigned long dayCycleTime   = 27000000; // daytime lights on period (7h30m)
+unsigned long onPulseTime    =   900000; // Gap between lights-on fan pulses (15m)
+unsigned long offPulseTime   =  3600000; // Gap between lights-off fan pulses (1h)
+unsigned long pulseTime      =    30000; // Fan pulse length (30s)
+unsigned int readTime        =      333; // delay between temperature readings (1/3s)
 
 // Fan 
 // Comment out the fan pin definition in pins.h to disable fan.
@@ -75,7 +74,7 @@ byte fanMinSpeed = 96;    // min fan PWM value (also; pulse speed)
 byte fanMaxSpeed = 255;   // max fan PWM value
 
 // User Interface
-long buttonDelay = 1000;    // Button hold down delay (debounce and anti-nudge)
+long buttonDelay = 1000;    // Button hold down delay (1s)
 byte lcdOn  = 255;          // lcd backlight when lights on
 byte lcdOff = 32;           // lcd backlight when lights off
 
@@ -115,7 +114,7 @@ void setup()
   Serial.println();
   Serial.println(F("Welcome to Aqua328"));
   Serial.println(F("https://github.com/easytarget/Aqua328-Software"));
-  Serial.println(F("Commands: l - logging, q - quiet, i - status, b - button"));
+  Serial.println(F("Commands: v - logging, i - status, b - button"));
 
   // PWM Prescaler to set PWM base frequency; avoids fan noise (whine) and make LED's smooth
   TCCR0B = TCCR0B & B11111000 | B00000010; // Timer0 (D5,D6) ~7.8 KHz
@@ -132,8 +131,9 @@ void setup()
   lcd.createChar(2, degreesGlyph);
   lcd.createChar(3, fanGlyph);  // Fan symbol
   lcd.createChar(4, fan1Glyph); // Fan level 1
-  lcd.createChar(5, fan2Glyph); // fan level 2
-  lcd.createChar(6, fan3Glyph); // fan level 3
+  lcd.createChar(5, fan2Glyph); // Fan level 2
+  lcd.createChar(6, fan3Glyph); // Fan level 3
+  lcd.createChar(7, fanPulseGlyph); // Fan pulsing
 
   lcd.setCursor(0,0);    // Say Hello
   lcd.print("Aqua328");
@@ -183,13 +183,12 @@ bool firstOneWireDevice(void) {
   if ( oneWire.search(addr))  {
     Serial.print(F("Found OneWire device with address: "));
     for( i = 0; i < 8; i++) {
-      Serial.print("0x");
       if (addr[i] < 16) {
         Serial.print('0');
       }
       Serial.print(addr[i], HEX);
       if (i < 7) {
-        Serial.print(F(", "));
+        Serial.print(F(":"));
       }
       tankThermometer[i] = addr[i];
     }
@@ -207,7 +206,7 @@ bool firstOneWireDevice(void) {
   return true;
 }
 
-// Get a temperature reading and displays it.
+// Get a temperature reading and display it.
 float readTemp() {
   float tankTemp = -127;
   if (tempSensor) {
@@ -233,7 +232,7 @@ void showTemp(float temp) {
 }
 
 
-// Take supplied temperature and maps that to the fan PWM pin as needed
+// Take supplied temperature and map that to the fan PWM
 byte setFan(float temp) {
   byte fan = 0;
   // use temperature to calculate PWM value proportionally within the min and max range
@@ -275,7 +274,20 @@ byte setFan(float temp) {
 
 // Serial logging 
 void logState() {
-  Serial.print(F("Tank: "));
+  Serial.print(F("["));
+  unsigned long l = floor(millis()/1000/timeScale);
+  int s = l%60;
+  int m = int(floor(l / 60)) % 60;
+  int h = int(floor(l/3600)) % 24;
+  if (h < 10) Serial.print('0');
+  Serial.print(h);
+  Serial.print(':');
+  if (m < 10) Serial.print('0');
+  Serial.print(m);
+  Serial.print(':');
+  if (s < 10) Serial.print('0');
+  Serial.print(s);
+  Serial.print(F("] Tank: "));
   if (!tempSensor) Serial.print(F("No Sensor: "));
   else if (currentTemp == -127) Serial.print(F("Sensor Error: "));
   else {
@@ -294,8 +306,6 @@ void logState() {
     Serial.print(F(": Fan: "));
     Serial.print(fanVal);
   #endif
-  Serial.print(F(": Countdown: "));
-  Serial.print((float)millis()/1000/timeScale,0);
   Serial.println();
 }
 
@@ -417,21 +427,19 @@ int loopTime = 100;                     // Minimum loop time (ms)
 int ledLevel = 0;                       // LED level (R+G+B) 
 int ledTotal = 767;                     // Maximum brightness 
 int slowStep = changeTime / ledTotal;   // Millis per step in slow change mode
-bool flash = false;                     // used to fast flash icons
 char bannerMem[11] = "          ";      // Only update banner when needed
-unsigned long lastChange = millis();  // last time we changed light
 unsigned long buttonStart = 0;          // timer for button
 unsigned long lastRead = millis();      // temperature read timer
 unsigned long lastPulse = 0;            // fan pulse timer
-unsigned long lastLog = 0;              // log timer
+unsigned long lastLog = 0;              // log timer, preloaded
 
 void loop() {
   unsigned long loopStart = millis();  // Note when we started.
-  char banner[11] = "Aqua328   ";
+  char banner[13] = "Aqua328     ";
   bool button = false;  
   bool lid = false;  
 
-  // Show the water temperature.
+  // Read the water temperature and set fan appropriately
   if (tempSensor && ((millis() - lastRead) > (readTime * timeScale))) {
     // Get the temperature (and display at same time)
     currentTemp = readTemp();
@@ -440,35 +448,53 @@ void loop() {
     fanVal = setFan(currentTemp);
   }
 
-  // Fan pulsing when not over temp
+  // Fan pulses when not over temp
   if (fanVal == 0) {
     unsigned long thisPulse = onPulseTime;
     if (ledState == Off) thisPulse = offPulseTime;
     if ((millis() - lastPulse) > ((thisPulse + pulseTime) * timeScale)) {
       analogWrite(FAN, 0);
-      lcd.setCursor(14,0);
+      lcd.setCursor(15,0);
       lcd.write(' ');
       lastPulse = millis();
-      Serial.println(F(":Pulse Stop"));
+      Serial.println(F("Fan: Pulsed"));
     }
     else if ((millis() - lastPulse ) > (thisPulse * timeScale)) {
       analogWrite(FAN, fanMinSpeed);
-      lcd.setCursor(14,0);
-      if (flash) lcd.write(byte(3));
-      else lcd.write(' ');
-      flash = !flash;
-      Serial.print('.');
+      lcd.setCursor(15,0);
+      lcd.write(byte(7));
     } 
   }
-  else lastPulse = millis();  // holds pulses off when fan on for temperature
+  else lastPulse = millis();  // holds pulses off when fan auto
 
   // LEDs
   int newLevel = ledLevel;
   switch (ledState) {
     case Off: newLevel = 0; break;
-    case TurnOn: if (millis() - lastChange > (slowStep * timeScale)) newLevel++; break;
+    case TurnOn: if (millis()-lastChange > (slowStep*timeScale)) newLevel++; break; 
     case FastOn: newLevel+= 10; break;
-    case On: newLevel = ledTotal; break;
+    case On: {
+        newLevel = ledTotal;
+        char num [4];
+        unsigned long l = floor(((lastChange+(dayCycleTime*timeScale))-millis())/1000/timeScale);
+        int s = l%60;
+        int m = int(floor(l/60))%60;
+        int h = floor(l/3600);
+        strcpy(banner,"Off ");
+        sprintf (num, "%u", h);
+        strcat(banner,num);
+        strcat(banner,":");
+        sprintf (num, "%02u", m);
+        strcat(banner,num);
+        strcat(banner,":");
+        sprintf (num, "%02u", s);
+        strcat(banner,num);
+        if (millis()-lastChange > (dayCycleTime*timeScale)) {
+          Serial.println(F("Auto Off"));
+          ledState = TurnOff; 
+          cycleOff(); 
+        }  
+      } break;
     case TurnOff: if (millis() - lastChange > (slowStep * timeScale)) newLevel--; break;
     case FastOff: newLevel-= 10; break;
   }
@@ -492,21 +518,36 @@ void loop() {
   // Serial control
   if (Serial.available()) {
     switch (Serial.read()) {
-      case 'l': serialLog = true; Serial.println(F("Log: On")); break;
-      case 'q': serialLog = false; Serial.println(F("Log: Off")); break;
+      case 'v': {
+          serialLog = !serialLog; 
+          if (serialLog) {
+            Serial.println(F("Log: On"));
+            lastLog = millis() - (logInterval * timeScale);
+          } else {
+            Serial.println(F("Log: Off"));
+          }
+        } break;
       case 'i': logState(); break;
       case 'b': button = true; break;  // Serial simulation of button
+      //case 'l': Serial.println(F("Lid Open")); break;
+      //case 'c': Serial.println(F("Lid Closed")); break;
     }
     while (Serial.available()) Serial.read(); // chomp serial buffer
   }
 
   // test if button been activated for a specified time
   if (!digitalRead(USERSWITCH)) { // switches are inverted..
-    strcpy(banner, "Button    ");
+    strcpy(banner, "Button      ");
     if (buttonStart == 0)
       buttonStart = millis();
     if ((millis() - buttonStart) > (buttonDelay * timeScale)) 
-      strcpy(banner, "Confirm   ");
+      switch (ledState) {  // feedback
+       case Off:     strcpy(banner, "Lights On   "); break;
+       case TurnOn:  strcpy(banner, "Fast On     "); break;
+       case On:      strcpy(banner, "Lights Off  "); break;
+       case TurnOff: strcpy(banner, "Fast Off    "); break;
+       default:      strcpy(banner, "            "); 
+      }
   } 
   else if (buttonStart != 0) {
     if ((millis() - buttonStart) > (buttonDelay * timeScale)) {  
@@ -527,7 +568,7 @@ void loop() {
 
   // test if lid has been activated
   if (!digitalRead(LIDSWITCH)) { // switches are inverted..
-    strcpy(banner, "Lid       ");
+    strcpy(banner, "Lid         ");
     Serial.println(F("Lid: opened"));
     lid = true;
     // Do more here once lid switch hardware is in place; 
