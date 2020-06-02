@@ -6,7 +6,7 @@
 // OneWire on pin D2
 //#define ONE_WIRE_BUS 4    //  <---- BREADBOARD (AdaFruit Trinket + ftdi)
 #define ONE_WIRE_BUS 2
-#define TEMPERATURE_PRECISION 9
+#define TEMPERATURE_PRECISION 10
 
 // Switches
 #define LIDSWITCH 7  // active low on digital pin D7
