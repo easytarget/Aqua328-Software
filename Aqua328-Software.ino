@@ -115,6 +115,7 @@ void setup()
   Serial.println(F("Welcome to Aqua328"));
   Serial.println(F("https://github.com/easytarget/Aqua328-Software"));
   Serial.println(F("Commands: v - logging, i - status, b - button"));
+  Serial.println();
 
   // PWM Prescaler to set PWM base frequency; avoids fan noise (whine) and make LED's smooth
   TCCR0B = TCCR0B & B11111000 | B00000010; // Timer0 (D5,D6) ~7.8 KHz
@@ -181,6 +182,7 @@ bool firstOneWireDevice(void) {
   byte addr[8];
   
   if ( oneWire.search(addr))  {
+    logTime();
     Serial.print(F("Found OneWire device with address: "));
     for( i = 0; i < 8; i++) {
       if (addr[i] < 16) {
@@ -194,11 +196,13 @@ bool firstOneWireDevice(void) {
     }
     Serial.println();
     if ( OneWire::crc8( addr, 7) != addr[7]) {
+        logTime();
         Serial.print(F("Invalid OneWire CRC! No temperature functions available"));
         return false;
     }
   }
   else {
+   logTime();
    Serial.print(F("No OneWire devices found: No temperature functions available"));
    return false;
   }
@@ -273,7 +277,7 @@ byte setFan(float temp) {
 }
 
 // Serial logging 
-void logState() {
+void logTime() {
   Serial.print(F("["));
   unsigned long l = floor(millis()/1000/timeScale);
   int s = l%60;
@@ -287,7 +291,13 @@ void logState() {
   Serial.print(':');
   if (s < 10) Serial.print('0');
   Serial.print(s);
-  Serial.print(F("] Tank: "));
+  Serial.print(F("] "));
+}
+
+// Serial logging 
+void logState() {
+  logTime();
+  Serial.print(F("Tank: "));
   if (!tempSensor) Serial.print(F("No Sensor: "));
   else if (currentTemp == -127) Serial.print(F("Sensor Error: "));
   else {
@@ -357,6 +367,7 @@ void notifyBeep(int beeps) {
 
 // Announce turn on
 void cycleOn() {
+  logTime();
   Serial.println(F("Lights: Turning On"));
   lightsontune();
   for (int lcdVal=lcdOff; lcdVal < lcdOn; lcdVal++) {
@@ -367,6 +378,7 @@ void cycleOn() {
 
 // Announce turn off
 void cycleOff() {
+  logTime();
   Serial.println(F("Lights: Turning Off"));
   lightsofftune();
   for (int lcdVal=lcdOn; lcdVal > lcdOff; lcdVal--) {
@@ -386,6 +398,7 @@ void setLED(int level) {
     greenVal = 0;
     blueVal = 0;
     lcd.print(F("Off"));
+    logTime();
     Serial.println(F("Lights: Off"));
   } else if (level < 256) {
     redVal = level;
@@ -410,6 +423,7 @@ void setLED(int level) {
     greenVal = 255;
     blueVal = 255;
     lcd.print(F("On"));
+    logTime();
     Serial.println(F("Lights: On"));
   }
   lcd.print(F("      "));
@@ -457,6 +471,7 @@ void loop() {
       lcd.setCursor(15,0);
       lcd.write(' ');
       lastPulse = millis();
+      logTime();
       Serial.println(F("Fan: Pulsed"));
     }
     else if ((millis() - lastPulse ) > (thisPulse * timeScale)) {
@@ -490,6 +505,7 @@ void loop() {
         sprintf (num, "%02u", s);
         strcat(banner,num);
         if (millis()-lastChange > (dayCycleTime*timeScale)) {
+          logTime();
           Serial.println(F("Auto Off"));
           ledState = TurnOff; 
           cycleOff(); 
@@ -521,9 +537,11 @@ void loop() {
       case 'v': {
           serialLog = !serialLog; 
           if (serialLog) {
+            logTime();
             Serial.println(F("Log: On"));
             lastLog = millis() - (logInterval * timeScale);
           } else {
+            logTime();
             Serial.println(F("Log: Off"));
           }
         } break;
@@ -551,6 +569,7 @@ void loop() {
   } 
   else if (buttonStart != 0) {
     if ((millis() - buttonStart) > (buttonDelay * timeScale)) {  
+      logTime();
       Serial.println(F("Button: pressed"));
       button = true;
     }
@@ -560,15 +579,16 @@ void loop() {
   if (button) {
     switch (ledState) {
       case Off: ledState = TurnOn; cycleOn(); break;
-      case TurnOn: ledState = FastOn; buttonBeep(1); Serial.println(F("Speedup")); break;
+      case TurnOn: ledState = FastOn; buttonBeep(1); logTime(); Serial.println(F("Speedup")); break;
       case On: ledState = TurnOff; cycleOff(); break;
-      case TurnOff: ledState = FastOff; buttonBeep(1); Serial.println(F("Speedup")); break;
+      case TurnOff: ledState = FastOff; buttonBeep(1); logTime(); Serial.println(F("Speedup")); break;
     }
   }
 
   // test if lid has been activated
   if (!digitalRead(LIDSWITCH)) { // switches are inverted..
     strcpy(banner, "Lid         ");
+    logTime();
     Serial.println(F("Lid: opened"));
     lid = true;
     // Do more here once lid switch hardware is in place; 
