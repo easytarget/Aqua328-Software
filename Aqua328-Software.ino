@@ -546,7 +546,7 @@ void loop() {
           }
         } break;
       case 'i': logState(); break;
-      case 'b': button = true; break;  // Serial simulation of button
+      case 'b': button = true; logTime(); Serial.println(F("Serial Button")); break;
       //case 'l': Serial.println(F("Lid Open")); break;
       //case 'c': Serial.println(F("Lid Closed")); break;
     }
@@ -570,7 +570,7 @@ void loop() {
   else if (buttonStart != 0) {
     if ((millis() - buttonStart) > (buttonDelay * timeScale)) {  
       logTime();
-      Serial.println(F("Button: pressed"));
+      Serial.println(F("Button pressed"));
       button = true;
     }
     buttonStart = 0;
