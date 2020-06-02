@@ -616,7 +616,7 @@ void loop() {
     // Eg: notify and dim lights, set feeding timer, etc..
   }
 
-  // Update banner if necesscary
+  // Update banner as needed
   if (strcmp(banner,bannerMem) != 0) {
     lcd.setCursor(0,0);
     lcd.print(banner);
