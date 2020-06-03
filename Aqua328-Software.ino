@@ -68,8 +68,8 @@ unsigned int readTime        =      333; // delay between temperature readings (
 // Fan 
 // Comment out the fan pin definition in pins.h to disable fan.
 byte fanVal = 0;          // Default to Off
-float fanMinTemp = 26.5;  // min speed at this temp
-float fanMaxTemp = 27.5;  // max speed at this temp
+float fanMinTemp = 27;    // min speed at this temp
+float fanMaxTemp = 28;    // max speed at this temp
 byte fanMinSpeed = 96;    // min fan PWM value (also; pulse speed)
 byte fanMaxSpeed = 255;   // max fan PWM value
 
@@ -77,6 +77,7 @@ byte fanMaxSpeed = 255;   // max fan PWM value
 long buttonDelay = 1000;    // Button hold down delay (1s)
 byte lcdOn  = 255;          // lcd backlight when lights on
 byte lcdOff = 32;           // lcd backlight when lights off
+#define BSIZE 13            // the upper banner size + null
 
 // PWM frequency (timer0) adjustment
 int timeScale;  // Used to scale time values, defined in setup()
@@ -447,7 +448,7 @@ void setLED(int level) {
 int ledLevel = 0;                       // LED level (R+G+B) 
 int ledTotal = 767;                     // Maximum brightness 
 int slowStep = changeTime / ledTotal;   // Millis per step in slow change mode
-char bannerMem[11] = "          ";      // Only update banner when needed
+char bannerMem[BSIZE] = "          ";   // Only update banner when needed
 unsigned long buttonStart = 0;          // timer for button
 unsigned long lastRead = millis();      // temperature read timer
 unsigned long lastPulse = 0;            // fan pulse timer
@@ -455,10 +456,10 @@ unsigned long lastLog = 0;              // log timer, preloaded
 
 void loop() {
   unsigned long loopStart = millis();  // Note when we started.
-  char banner[13] = "Aqua328     ";
+  char banner[BSIZE] = "Aqua328     ";
   bool button = false;  
   bool lid = false;  
-
+  
   // Read the water temperature and set fan appropriately
   if (tempSensor && ((millis() - lastRead) > (readTime * timeScale))) {
     // Get the temperature (and display at same time)
