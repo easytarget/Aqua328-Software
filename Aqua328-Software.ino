@@ -56,7 +56,6 @@ byte greenVal = 0;
 enum activityStates ledState = Off; // State, start 'Off'
 unsigned long lastChange = millis(); // last time we changed led level
 
-
 // Timing
 unsigned long changeTime     =  1800000; // Full LED change (off-on or on-off) (30m)
 unsigned long dayCycleTime   = 27000000; // daytime lights on period (7h30m)
@@ -93,7 +92,7 @@ bool serialLog = false;         // Show temperature on serial port
 void setup()
 {
   // General IO Pins
-  pinMode(LIDSWITCH,INPUT_PULLUP);  // Lid switch to input & pull-up
+  if (LIDSWITCH != -1) pinMode(LIDSWITCH,INPUT_PULLUP);  // Lid switch to input & pull-up
   pinMode(USERSWITCH,INPUT_PULLUP); // User button to input & pull-up
   pinMode(RED,OUTPUT);              // PWM: RED led channel
   pinMode(GREEN,OUTPUT);            // PWM: GREEN led channel
@@ -115,7 +114,7 @@ void setup()
   Serial.println();
   Serial.println(F("Welcome to Aqua328"));
   Serial.println(F("https://github.com/easytarget/Aqua328-Software"));
-  Serial.println(F("Commands: v - logging, i - status, b - button"));
+  Serial.println(F("Commands: v - logging, i - status, b - button, l - lid toggle"));
   Serial.println();
 
   // PWM Prescaler to set PWM base frequency; avoids fan noise (whine) and LED flicker
@@ -397,9 +396,9 @@ void cycleOff() {
 
 // LED level setting and feedback
 void setLED(int level) {
-  byte pInd = '?';
-  if ((ledState == TurnOn) || (ledState == FastOn)) pInd = 0; // up
-  if ((ledState == TurnOff) || (ledState == FastOff)) pInd = 1; // down
+  byte pInd = ' ';
+  if ((ledState == TurnOn) || (ledState == FastOn)) pInd = 0; // up Glyph
+  if ((ledState == TurnOff) || (ledState == FastOff)) pInd = 1; // down Glyph
   lcd.setCursor(0,1);
   if (level == 0) {
     redVal = 0;
@@ -440,6 +439,27 @@ void setLED(int level) {
   analogWrite(BLUE,blueVal);
 }
 
+// Display the countdown
+void countDown() {
+  char num [4];
+  long l = ((lastChange+(dayCycleTime*timeScale))-millis());
+  l = constrain(l,0,dayCycleTime*timeScale);
+  l = floor(l/1000/timeScale);
+  int s = l%60;
+  int m = int(floor(l/60))%60;
+  int h = int(floor(l/3600))%100;
+  lcd.setCursor(0,1);
+  sprintf (num, "%u", h);
+  lcd.print(num);
+  lcd.print(':');
+  sprintf (num, "%02u", m);
+  lcd.print(num);
+  lcd.print(':');
+  sprintf (num, "%02u", s);
+  lcd.print(num);
+  lcd.print(' ');
+}
+
 /*
  * Main Control loop
  * states are: {Off, TurnOn, FastOn, On, TurnOff, FastOff}
@@ -449,6 +469,8 @@ int ledLevel = 0;                       // LED level (R+G+B)
 int ledTotal = 767;                     // Maximum brightness 
 int slowStep = changeTime / ledTotal;   // Millis per step in slow change mode
 char bannerMem[BSIZE] = "          ";   // Only update banner when needed
+bool lidOverride = false;               // Used for serial lid open emulation
+unsigned long lidStart = 0;             // timer for lid
 unsigned long buttonStart = 0;          // timer for button
 unsigned long lastRead = millis();      // temperature read timer
 unsigned long lastPulse = 0;            // fan pulse timer
@@ -496,34 +518,20 @@ void loop() {
     case TurnOn: if (millis()-lastChange > (slowStep*timeScale)) newLevel++; break; 
     case FastOn: newLevel+= 10; break;
     case On: {
-        newLevel = ledTotal;
-        char num [4];
-        long l = ((lastChange+(dayCycleTime*timeScale))-millis());
-        l = constrain(l,0,dayCycleTime*timeScale);
-        l = floor(l/1000/timeScale);
-        int s = l%60;
-        int m = int(floor(l/60))%60;
-        int h = int(floor(l/3600))%100;
-        lcd.setCursor(0,1);
-        sprintf (num, "%u", h);
-        lcd.print(num);
-        lcd.print(':');
-        sprintf (num, "%02u", m);
-        lcd.print(num);
-        lcd.print(':');
-        sprintf (num, "%02u", s);
-        lcd.print(num);
-        lcd.print(' ');
-        if (millis()-lastChange > (dayCycleTime*timeScale)) {
-          logTime();
-          Serial.println(F("Auto: Turn Off"));
-          ledState = TurnOff; 
-          cycleOff(); 
-        }  
-      } break;
+              newLevel = ledTotal;
+              countDown();  // Show remaining ON time
+              // Turn off when we time out
+              if (millis()-lastChange > (dayCycleTime*timeScale)) {
+                logTime();
+                Serial.println(F("Auto: Turn Off"));
+                ledState = TurnOff; 
+                cycleOff(); 
+              }  
+            } break;
     case TurnOff: if (millis() - lastChange > (slowStep * timeScale)) newLevel--; break;
     case FastOff: newLevel-= 10; break;
   }
+
   newLevel = constrain(newLevel, 0, ledTotal); 
   // Set new level only if it is changed
   if (newLevel != ledLevel) {
@@ -531,6 +539,7 @@ void loop() {
     ledLevel = newLevel;
     setLED(ledLevel);
   }
+
   // Change state when limits are reached
   if ((newLevel == ledTotal) && (ledState != On) && (ledState != TurnOff)) {
     ledState = On;
@@ -545,20 +554,24 @@ void loop() {
   if (Serial.available()) {
     switch (Serial.read()) {
       case 'v': {
-          serialLog = !serialLog; 
-          if (serialLog) {
-            logTime();
-            Serial.println(F("Log: On"));
-            lastLog = millis() - (logInterval * timeScale);
-          } else {
-            logTime();
-            Serial.println(F("Log: Off"));
-          }
-        } break;
+                  serialLog = !serialLog; 
+                  if (serialLog) {
+                    logTime();
+                    Serial.println(F("Log: On"));
+                    lastLog = millis() - (logInterval * timeScale);
+                  } else {
+                    logTime();
+                    Serial.println(F("Log: Off"));
+                  }
+                } break;
       case 'i': logState(); break;
       case 'b': button = true; logTime(); Serial.println(F("Button: Serial")); break;
-      //case 'l': Serial.println(F("Lid Open")); break;
-      //case 'c': Serial.println(F("Lid Closed")); break;
+      case 'l': {
+                  lidOverride = !lidOverride; 
+                  if (lidOverride) Serial.println(F("Lid Open"));
+                  else Serial.println(F("Lid Closed"));
+                  break;
+                }
     }
     while (Serial.available()) Serial.read(); // chomp serial buffer
   }
@@ -585,6 +598,7 @@ void loop() {
     }
     buttonStart = 0;
   }
+
   // Process button actions according to state
   if (button) {
     switch (ledState) {
@@ -608,13 +622,24 @@ void loop() {
   }
 
   // test if lid has been activated
-  if (!digitalRead(LIDSWITCH)) { // switches are inverted..
-    strcpy(banner, "Lid         ");
-    logTime();
-    Serial.println(F("Lid: Opened"));
-    lid = true;
-    // Do more here once lid switch hardware is in place; 
-    // Eg: notify and dim lights, set feeding timer, etc..
+  if (LIDSWITCH != 0) {
+    if (!digitalRead(LIDSWITCH) || lidOverride) { // switches are inverted
+      strcpy(banner, "Lid         ");
+      if (lidStart == 0) {
+        logTime();
+        Serial.println(F("Lid: Opened"));
+        lidStart = millis();
+      } 
+      lid = true;
+      // Do more here once lid switch hardware is in place; 
+      // Eg: notify and dim lights, set feeding timer, etc..
+    } else {
+      if (lidStart > 0) {
+        logTime();
+        Serial.println(F("Lid: Closed"));
+        lidStart = 0;
+      } 
+    }
   }
 
   // Update banner as needed

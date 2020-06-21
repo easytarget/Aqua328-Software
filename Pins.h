@@ -9,8 +9,9 @@
 #define TEMPERATURE_PRECISION 10
 
 // Switches
-#define LIDSWITCH 7  // active low on digital pin D7
 #define USERSWITCH 8 // active low on digital pin D8
+//#define LIDSWITCH 12    //  <---- BREADBOARD (AdaFruit Trinket + ftdi)
+#define LIDSWITCH 7  // active low on digital pin D7, -1 to disable
 
 // Lights
 #define RED 5   // Red LED PWM on D5
