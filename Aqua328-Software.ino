@@ -68,9 +68,13 @@ unsigned int readTime        =      333; // delay between temperature readings (
 // Comment out the fan pin definition in pins.h to disable fan.
 byte fanVal = 0;          // Default to Off
 float fanMinTemp = 27;    // min speed at this temp
-float fanMaxTemp = 28;    // max speed at this temp
+float fanMaxTemp = 29;    // max speed at this temp
 byte fanMinSpeed = 96;    // min fan PWM value (also; pulse speed)
 byte fanMaxSpeed = 255;   // max fan PWM value
+
+// Temperature based Light Dimmer
+float ledDimTemp = 28;  // dim down above this tempreature
+float ledOffTemp = 30;  // lighting off above this temp
 
 // User Interface
 #define BSIZE 13                         // the upper banner size (12 chars + null)
@@ -179,7 +183,7 @@ void setup()
   splashtune();
 
   // Go into initial 'off' state
-  setLED(0);
+  setLED(0,255);
   for (int lcdVal=lcdOn; lcdVal > lcdOff; lcdVal--) {
     analogWrite(BACKLIGHT,lcdVal);
     myDelay(1);
@@ -435,49 +439,67 @@ void cycleOff() {
 }
 
 // LED level setting and feedback
-unsigned int setLED(unsigned int level) {
-  byte pInd = ' ';
-  if ((ledState == TurnOn) || (ledState == FastOn)) pInd = 0; // up Glyph
-  if ((ledState == TurnOff) || (ledState == FastOff)) pInd = 1; // down Glyph
-  lcd.setCursor(0,1);
-  if (level == 0) {
-    redVal = 0;
-    greenVal = 0;
-    blueVal = 0;
-    lcd.print(F("Off"));
-    logTime();
-    Serial.println(F("Lights: Off"));
-  } else if (level < 256) {
-    redVal = level;
-    greenVal = 0;
-    blueVal = 0;
-    lcd.write(pInd);
-  } else if (level < 512) {
-    redVal = 255;
-    greenVal = level - 256;
-    blueVal = 0;
-    lcd.write(pInd);
-    lcd.write(pInd);
- } else if (level < 767) {
-    redVal = 255;
-    greenVal = 255;
-    blueVal = level - 512;
-    lcd.write(pInd);
-    lcd.write(pInd);
-    lcd.write(pInd);
-  } else {
-    redVal = 255;
-    greenVal = 255;
-    blueVal = 255;
+// dimmer is a max value applied to all channels evenly
+unsigned int lastLevel;
+byte lastDimmer;
+
+bool setLED(unsigned int level, byte dimmer) {
+  level = constrain(level,0,767); 
+  dimmer = constrain(dimmer,0,255);
+
+  if ((level != lastLevel) || (dimmer != lastDimmer)) {
+    lcd.setCursor(0,1);
+    char dir = ' ';  // no Glyph
+    if ((ledState == TurnOn) || (ledState == FastOn)) dir = char(0); // up Glyph
+    if ((ledState == TurnOff) || (ledState == FastOff)) dir = char(1); // down Glyph
+    if (level == 0) {
+      redVal = 0;
+      greenVal = 0;
+      blueVal = 0;
+      lcd.print(F("Off"));
+      if (lastLevel != level) { // log when the main loop hits limits
+        logTime();
+        Serial.println(F("Lights: Off"));
+      }
+    } else if (level < 256) {
+      redVal = min(level, dimmer);
+      greenVal = 0;
+      blueVal = 0;
+      lcd.write(dir);
+    } else if (level < 512) {
+      redVal = dimmer;
+      greenVal = min(level - 256, dimmer);
+      blueVal = 0;
+      lcd.write(dir);
+      lcd.write(dir);
+   } else if (level < 767) {
+      redVal = dimmer;
+      greenVal = dimmer;
+      blueVal = min(level - 512, dimmer);
+      lcd.write(dir);
+      lcd.write(dir);
+      lcd.write(dir);
+    } else {
+      redVal = dimmer;
+      greenVal = dimmer;
+      blueVal = dimmer;
+      if (dimmer == 255 ) lcd.print(F("On"));
+      else lcd.print(F("Dim"));
+      if (lastLevel != level) {  // log when the main loop hits limits
+        logTime();
+        Serial.println(F("Lights: On"));
+      }
+    }
     lcd.print(F("      "));
-    logTime();
-    Serial.println(F("Lights: On"));
+    analogWrite(RED,redVal);
+    analogWrite(GREEN,greenVal);
+    analogWrite(BLUE,blueVal);
+    lastLevel = level;
+    lastDimmer = dimmer; 
+    return(true); // levels changed
+  } else {
+    return(false); // nothing changed
   }
-  lcd.print(F("      "));
-  analogWrite(RED,redVal);
-  analogWrite(GREEN,greenVal);
-  analogWrite(BLUE,blueVal);
-  return(level);
 }
 
 // Display the countdown
@@ -506,9 +528,11 @@ void countDown() {
  * states are: {Off, TurnOn, FastOn, On, TurnOff, FastOff}
  */
 
+// Primary light level is a linear value, covering the 3 channels with 256 values/channel
+// Value is applied to Red, then Green/white then Blue, creating a sequenced fade up/down
 unsigned int ledLevel          = 0;                      // Desired LED level (R+G+B) 
-unsigned int ledActual         = 0;                      // Last value written
-unsigned int ledTotal          = 767;                    // Maximum brightness
+unsigned int ledTotal          = 767;                    // Maximum brightness (R+G+B)
+byte maintDimmer               = 255;                    // Override lights in maintenance
 int slowStep                   = changeTime / ledTotal;  // Millis per step in On/Off change mode 
 int fastStep                   = 10;                     // Steps per loop cycle in fast On/Off modes
 char bannerMem[BSIZE]          = "          ";           // Only update banner when needed
@@ -562,7 +586,7 @@ void loop() {
     case FastOn: newLevel+= fastStep; break;
     case On: {
               newLevel = ledTotal;
-              countDown();  // Show remaining ON time
+              if (maintDimmer == 255) countDown();  // Show remaining ON time
               // Turn off when we time out
               if (millis()-lastChange > (dayCycleTime*timeScale)) {
                 logTime();
@@ -577,11 +601,23 @@ void loop() {
 
   newLevel = constrain(newLevel, 0, ledTotal);
   
-  // Set new level when it is changed
+  // reset timer when main level has changed
   if (newLevel != ledLevel) {
-    lastChange = millis();  // only start timer for changes to the desired level 
+    lastChange = millis();
     ledLevel = newLevel;
   }
+
+  // Maintenance Dimmer 
+  if (maintenance) maintDimmer = max(maintDimmer-10,0); 
+  else maintDimmer = min(maintDimmer+10,255);
+
+  // Temperature Dimmer 
+  const float dimRate = 255 / (ledOffTemp-ledDimTemp);
+  byte tempDimmer = constrain(255 - ((currentTemp - ledDimTemp) * dimRate),0,255);
+  if (tempDimmer < 255) strcpy(banner,"Cooling     ");
+
+  // Set the LEDs
+  setLED(ledLevel,min(tempDimmer,maintDimmer));
 
   // Change state when limits are reached
   if ((ledLevel == ledTotal) && (ledState != On) && (ledState != TurnOff)) {
@@ -592,17 +628,6 @@ void loop() {
     ledState = Off;
     notifyBeep(2);
   }
-
-  // Now adjust and constrain the desired level by the maintenance override level
-  int ledReal = ledActual;
-  if (maintenance) {
-    ledReal = max(0, ledReal-80);
-  } else {
-    ledReal = min(ledLevel, ledReal+80);
-  }
-   
-  // Only set the new value if it differs from the last one we set
-  if (ledActual != ledReal) ledActual = setLED(ledReal);
 
   // Serial control
   if (Serial.available()) {
@@ -640,7 +665,7 @@ void loop() {
 
   // lid
   if (LIDSWITCH != -1) {
-    if (!digitalRead(LIDSWITCH) || lidOverride) { // switches are inverted
+    if ((digitalRead(LIDSWITCH) == LIDOPEN) || lidOverride) {
       if (!maintenance) strcpy(banner, "Lid Open    ");
       else strcpy(banner, "Maintenance ");
       lastLid = millis();
@@ -690,10 +715,13 @@ void loop() {
   }
 
   // test if button been activated for a specified time
-  if (!digitalRead(USERSWITCH)) { // switches are inverted..
+  if (digitalRead(USERSWITCH) == USERPRESS) {
+    // Button pressed, show default message and start timer if needed
     strcpy(banner, "Button      ");
     if (buttonStart == 0)
       buttonStart = millis();
+
+    // Feedback during button press
     if ((millis() - buttonStart) > (buttonDelay * timeScale)) {
       if (lidStart == 0) {
         switch (ledState) {  // feedback
@@ -707,6 +735,7 @@ void loop() {
         strcpy(banner, "Maintenance ");
       }
     }
+
     // Process long button if appropriate,
     if (((millis() - buttonStart) > (3 * buttonDelay * timeScale)) && !maintenance) {
       if (ledState == On) {  // reduce 'on' timer when pressed.
@@ -722,21 +751,23 @@ void loop() {
       // not yet a long press
       longButton = false;
     }
-  } 
-  else if (buttonStart != 0) {
-    // record button only when released after being held down until triggered
+  }
+  else if (buttonStart != 0) { 
+    // Button not pressed, but timer running: set the flags for button release
     if ((millis() - buttonStart) > (buttonDelay * timeScale)) {  
       logTime();
       button = true;
       if (longButton) Serial.println(F("Button: Long Pressed"));
       else Serial.println(F("Button: Pressed"));
     }
+    // And always reset the timer
     buttonStart = 0;
   }
 
   // Process button actions according to state
   if (button) {
     if (lidStart == 0) {
+      // Main Button Actions only when lid closed
       switch (ledState) {
         case Off:      if (!longButton) {
                          ledState = TurnOn; 
@@ -768,6 +799,7 @@ void loop() {
         }
     }
     else {
+      // If lid open the only button action is to start maintenance mode
       logTime(); 
       Serial.println(F("Maintenance"));
       #ifdef FAN

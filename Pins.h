@@ -9,9 +9,11 @@
 #define TEMPERATURE_PRECISION 11
 
 // Switches
-//#define LIDSWITCH 12    //  <---- BREADBOARD (AdaFruit Trinket + ftdi)
-#define LIDSWITCH 7  // active low on digital pin D7, -1 to disable
-#define USERSWITCH 8 // active low on digital pin D8
+//#define LIDSWITCH 12  //  <---- BREADBOARD (AdaFruit Trinket + ftdi)
+#define LIDSWITCH 7    // digital pin D7, pullup enabled, -1 to disable
+#define USERSWITCH 8   // digital pin D8, pullup enabled
+#define LIDOPEN HIGH   // Pin in this state when Lid is open 
+#define USERPRESS LOW  // Pin in this state when user presses the button
 
 // Lights
 #define RED 5   // Red LED PWM on D5
