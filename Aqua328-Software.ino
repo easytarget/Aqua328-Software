@@ -1,34 +1,36 @@
 /* 
- Aquarium Light controller for an attended aquarium (no clock..)
+ Aquarium Light controller for an attended tropical/cold water aquarium 
  Based on ATMega328P processor
 
  Following a 'WakeUp' button press (when the staff are opening the shop up) it will:
    - Slowly fade the lights up, Red, then Green/White, then Blue.
    - 8 Hours Later it will slowly fade the lights down in the same order.
 
- It continually monitors and reports the temperature on the display, the light 
+ It continually monitors and reports the temperature on the display, the light, lid
  and fan status is shown there too.
 
- The fan briefly cycles during the day to refresh the air under the tank lid
- As the temperature rises between set limits the fan speed increases to provide cooling in summer.
+ Further button presses speed the fade cycles up, and provide a manual lights off function.
 
- If the Temperature continues to rise the lights are faded down to assist cooling
+ The fan briefly cycles during the day to refresh the air under the tank lid.
+ As the temperature rises between set limits the fan speed increases to provide
+ cooling in summer.  If the Temperature continues to rise the lights are faded 
+ back down to assist cooling.
 
- Additional button presses turn the lights on and off manually, and speed the fade cycles up.
-
- Pressing and long holding the button during the On cycle will decrease the time left
+ Pressing and long holding the button during the timed phase will decrease the time left, 
+ allowing you to 'run down' the timer if needed (eg after powering off for maintenance)
 
  When the lid is opened a alert tune is played, if the button is pressed while the lid is
- the tank enters maintenance mode, the lights are dimmed and the fan disabled, but the
- normal cycle timer continues.
+ open the tank enters maintenance mode, the lights are dimmed and the fan disabled if
+ necesscary, but the status and timer are preserved.
  
- If the lid has not been opened for 24 hrs afeeding reminder activates; a 'Please Feed' 
+ If the lid has not been opened for 24 hrs a feeding reminder activates; a 'Please Feed' 
  message is displayed and a beep is played every 5 minutes. After 48 hours the message 
  changes to 'Feed me Now' and we have 3 beeps every 3 minutes. Opening the lid to feed
  the fish clears this.
 
- Finally cheesy tunes entertain and delight; beeps feedback when the button is pressed
+ Both the Lid and Fan functionality is configurable, and can be disabled if not used.
 
+ Finally: Cheesy tunes entertain and delight (ymmv); beeps feedback when the button is pressed.
 */
 
 
@@ -51,15 +53,15 @@ OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 
 // Dallas OneWire temperature Sensor
-DeviceAddress tankThermometer;  // we will search for the address during setup
+DeviceAddress tankThermometer;  // Not defined here; we will search for the address during setup
 bool tempSensor=false; 
 float currentTemp = -127; // last successful reading (-127 == no sensor or other error)
 
 // Sounds
 Speaker loudSpeaker(SPEAKER_PIN);
 
-// State Machine
-// Basic light cycle with fast modes, can add lit open states etc later.
+// LED State Machine
+// Basic light cycle with fast modes.
 enum activityStates {Off, TurnOn, FastOn, On, TurnOff, FastOff};
 int loopTime = 100; // Minimum loop time (ms)
 
@@ -67,11 +69,11 @@ int loopTime = 100; // Minimum loop time (ms)
 byte blueVal = 0;
 byte redVal = 0;
 byte greenVal = 0;
-enum activityStates ledState = Off; // State, start 'Off'
-unsigned long lastChange = millis(); // last time we changed desired led level
+enum activityStates ledState = Off;  // State, start 'Off'
+unsigned long lastChange = millis(); // record whenever we change the desired led level
 
 // Timing
-unsigned long changeTime     =  1800000; // Full LED change (off-on or on-off) (30m)
+unsigned long changeTime     =  1800000; // Full LED change (off->on or on->off) (30m)
 unsigned long dayCycleTime   = 27000000; // daytime lights on period (7h30m)
 unsigned long onPulseTime    =   900000; // Gap between lights-on fan pulses (15m)
 unsigned long offPulseTime   =  3600000; // Gap between lights-off fan pulses (1h)
@@ -79,7 +81,7 @@ unsigned long pulseTime      =    30000; // Fan pulse length (30s)
 unsigned int readTime        =      333; // delay between temperature readings (1/3s)
 
 // Fan 
-// Comment out the fan pin definition in pins.h to disable fan.
+// Note: Comment out the fan pin definition in pins.h to disable fan.
 byte fanVal = 0;          // Default to Off
 float fanMinTemp = 27;    // min speed at this temp
 float fanMaxTemp = 29;    // max speed at this temp
@@ -91,6 +93,7 @@ float ledDimTemp = 28;  // dim down above this tempreature
 float ledOffTemp = 30;  // lighting off above this temp
 
 // User Interface
+// Note: Set the lid pin to -1 in pins.h to disable lid functionality
 #define BSIZE 13                          // the upper banner size (12 chars + null)
 long buttonDelay               = 1000;    // button hold down delay (1s)
 unsigned long buttonStart      = 0;       // timer for button
@@ -109,11 +112,11 @@ unsigned long lastLid             = 0;          // timer for feeding reminders
 unsigned long feedReminder        = 86400000;   // prompt for food time (24hrs)
 unsigned long feedNowReminder     = 172800000;  // alert for food time (48hrs)
 unsigned long feedBeepInterval    = 300000;     // Gap between feed beeps (5 mins)
-unsigned long feedNowBeepInterval = 60000;      // Gap between feed now beeps (1 min)
+unsigned long feedNowBeepInterval = 180000;     // Gap between feed now beeps (3 mins)
 
 // Serial Logging
 unsigned long logInterval = 60000;  // log once per minute
-bool serialLog = true;              // logging enable/disable
+bool serialLog = true;              // logging enabled by default
 
 /*
  * Setup and initialisation
@@ -121,7 +124,7 @@ bool serialLog = true;              // logging enable/disable
 
 void setup()
 {
-  /* handy for debug on breadboard:
+  /* Uncomment these for faster debug on breadboard:
   feedReminder        = 60000; 
   feedNowReminder     = 120000;
   feedBeepInterval    = 10000;
@@ -344,7 +347,7 @@ void logTime() {
   Serial.print(F("] "));
 }
 
-// Serial log values
+// Serial log the system values
 void logState() {
   logTime();
   Serial.print(F("Log: Tank: "));
