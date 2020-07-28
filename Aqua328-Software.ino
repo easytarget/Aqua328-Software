@@ -1,22 +1,36 @@
-// Aquarium Light controller for an attended aquarium (no clock..)
-// Based on ATMega328P processor
-//
-// Following a 'WakeUp' button press (when the staff are opening the shop up) it will:
-//   - Slowly fade the lights up, Red, then Green/White, then Blue.
-//   - 8 Hours Later it will slowly fade the lights down in the same order.
-//
-// It continually monitors and reports the temperature on the display, the light 
-// and fan status is shown there too.
-// 
-// The fan briefly cycles during the day to refresh the air under the tank lid
-// As the temperature rises between set limits the fan speed increases to provide cooling in summer.
-//
-// Additional button presses turn the lights on and off manually, and speed the fade cycles up.
-//
-// Finally cheesy tunes entertain and delight; beeps feedback when the button is pressed
-//
-//  ToDo; lid sensor that dims lights and alerts with a tune.
-//        feeding reminder linked to lid sensor
+/* 
+ Aquarium Light controller for an attended aquarium (no clock..)
+ Based on ATMega328P processor
+
+ Following a 'WakeUp' button press (when the staff are opening the shop up) it will:
+   - Slowly fade the lights up, Red, then Green/White, then Blue.
+   - 8 Hours Later it will slowly fade the lights down in the same order.
+
+ It continually monitors and reports the temperature on the display, the light 
+ and fan status is shown there too.
+
+ The fan briefly cycles during the day to refresh the air under the tank lid
+ As the temperature rises between set limits the fan speed increases to provide cooling in summer.
+
+ If the Temperature continues to rise the lights are faded down to assist cooling
+
+ Additional button presses turn the lights on and off manually, and speed the fade cycles up.
+
+ Pressing and long holding the button during the On cycle will decrease the time left
+
+ When the lid is opened a alert tune is played, if the button is pressed while the lid is
+ the tank enters maintenance mode, the lights are dimmed and the fan disabled, but the
+ normal cycle timer continues.
+ 
+ If the lid has not been opened for 24 hrs afeeding reminder activates; a 'Please Feed' 
+ message is displayed and a beep is played every 5 minutes. After 48 hours the message 
+ changes to 'Feed me Now' and we have 3 beeps every 3 minutes. Opening the lid to feed
+ the fish clears this.
+
+ Finally cheesy tunes entertain and delight; beeps feedback when the button is pressed
+
+*/
+
 
 #include <LiquidCrystal_I2C.h>
 #include <OneWire.h>
@@ -77,13 +91,14 @@ float ledDimTemp = 28;  // dim down above this tempreature
 float ledOffTemp = 30;  // lighting off above this temp
 
 // User Interface
-#define BSIZE 13                         // the upper banner size (12 chars + null)
-long buttonDelay              = 1000;    // button hold down delay (1s)
-unsigned long buttonStart     = 0;       // timer for button
-byte lcdOn                    = 255;     // lcd backlight setting when lights on
-byte lcdOff                   = 32;      // lcd backlight setting when lights off
-bool maintenance              = false;   // maintenance mode (supresses fan and lights)
-unsigned long lidBeepInterval = 120000;  // gap between lid open beeps (2 mins)
+#define BSIZE 13                          // the upper banner size (12 chars + null)
+long buttonDelay               = 1000;    // button hold down delay (1s)
+unsigned long buttonStart      = 0;       // timer for button
+byte lcdOn                     = 255;     // lcd backlight setting when lights on
+byte lcdOff                    = 32;      // lcd backlight setting when lights off
+bool maintenance               = false;   // maintenance mode (supresses fan and lights)
+unsigned long lidBeepInterval  = 120000;  // gap between lid open beeps (2 mins)
+unsigned long lidOpenQuietTime = 30000;   // lid open sound repeat holdoff (30s)
 
 // PWM frequency (timer0) adjustment
 int timeScale;  // Used to scale time values, defined in setup()
@@ -290,20 +305,20 @@ byte setFan(float temp) {
   int fanSpeedStep = (fanMaxSpeed - fanMinSpeed) / 4;
   lcd.setCursor(14,0);
   if (fan >= fanMinSpeed + fanSpeedStep*3) {
-    lcd.write(byte(3)); // 'fan'
-    lcd.write(byte(6)); // level 4
+    lcd.write(byte(3)); // 'fan' glyph
+    lcd.write(byte(6)); // level 4 glyph
   } 
   else if (fan >= fanMinSpeed + fanSpeedStep*2) {
-    lcd.write(byte(3)); // 'fan'
-    lcd.write(byte(5)); // level 3
+    lcd.write(byte(3)); // 'fan' glyph
+    lcd.write(byte(5)); // level 3 glyph
   }
   else if (fan >= fanMinSpeed + fanSpeedStep) {
-    lcd.write(byte(3)); // 'fan'
-    lcd.write(byte(4)); // level 2
+    lcd.write(byte(3)); // 'fan' glyph
+    lcd.write(byte(4)); // level 2 glyph
   }
   else if (fan >= fanMinSpeed) {
-    lcd.write(byte(3)); // 'fan'
-    lcd.print(' '); // level 1, no symbol
+    lcd.write(byte(3)); // 'fan' glyph
+    lcd.print(' '); // level 1, no glyph
   }
   else {
     lcd.print(F("  ")); // We are off, or no fan
@@ -668,14 +683,18 @@ void loop() {
     if ((digitalRead(LIDSWITCH) == LIDOPEN) || lidOverride) {
       if (!maintenance) strcpy(banner, "Lid Open    ");
       else strcpy(banner, "Maintenance ");
-      lastLid = millis();
       if (lidStart == 0) {
         logTime();
         Serial.println(F("Lid: Opened"));
         lidStart = millis();
-        lidtune();
+        if(millis() - lastLid > (lidOpenQuietTime * timeScale)) {
+          // dont play lid open tune when lid only closed for a few seconds..
+          lidtune();
+        }
         lastLidReminder = millis();
       }
+      // timestamp used for feeding reminders
+      lastLid = millis();
       // Lid reminder
       if (millis() - lastLidReminder > (lidBeepInterval * timeScale)) {
         logTime();
