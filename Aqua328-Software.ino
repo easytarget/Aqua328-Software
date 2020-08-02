@@ -92,6 +92,12 @@ byte fanMaxSpeed = 255;   // max fan PWM value
 float ledDimTemp = 28;  // dim down above this tempreature
 float ledOffTemp = 30;  // lighting off above this temp
 
+// Temperature Alarm
+float lowAlarmTemp =  22.5;           // Low temperature trigger level
+float highAlarmTemp = 30.5;           // High temperature trigger level
+unsigned long alarmInterval = 300000; // Alarm Interval (5 mins)
+int alarmBeeps = 5;                   // How many beeps to make at interval
+
 // User Interface
 // Note: Set the lid pin to -1 in pins.h to disable lid functionality
 #define BSIZE 13                          // the upper banner size (12 chars + null)
@@ -557,10 +563,11 @@ char bannerMem[BSIZE]          = "          ";           // Only update banner w
 bool lidOverride               = false;                  // Used for serial lid open emulation
 bool longButton                = false;                  // records if last button press was 'long'
 unsigned long lastRead         = millis();               // temperature read timer
-unsigned long lastPulse        = 0;                      // fan pulse timer
+unsigned long lastPulse        = millis();               // fan pulse timer
 unsigned long lastLog          = millis();               // log timer, preloaded
 unsigned long lastLidReminder  = millis();               // lid reminder timer
 unsigned long lastFeedReminder = millis();               // feeding reminder timer
+unsigned long lastAlarm        = millis()-(alarmInterval*timeScale); // alarm timer
 
 void loop() {
   unsigned long loopStart = millis();  // Note when we started.
@@ -749,7 +756,7 @@ void loop() {
         switch (ledState) {  // feedback
          case Off:     strcpy(banner, "Lights On   "); break;
          case TurnOn:  strcpy(banner, "Fast On     "); break;
-         case On:      strcpy(banner, "Lights Off  "); break;
+         case On:      strcpy(banner, "Already On! "); break;
          case TurnOff: strcpy(banner, "Fast Off    "); break;
         }
       }
@@ -806,8 +813,8 @@ void loop() {
                        Serial.println(F("Lights: Fast On")); 
                        break;
         case On:       if (!longButton) {
-                         ledState = TurnOff; 
-                         cycleOff();
+                         logTime();
+                         Serial.println(F("Button Pressed in 'On' State"));
                        } else if (!maintenance) {
                          logTime();
                          Serial.println(F("CountDown Reduced"));
@@ -831,6 +838,23 @@ void loop() {
     }
   }
 
+  // Temperature Alarms 
+  if (currentTemp <= lowAlarmTemp) {    
+    strcpy(banner, "! TOO COLD !");
+    strcpy(banner, "please check");
+    strcpy(banner, " heaters    ");
+  } else if (currentTemp >= highAlarmTemp) {
+    strcpy(banner, "! TOO HOT ! ");
+    strcpy(banner, " please add ");
+    strcpy(banner, " Cold Water ");
+  }
+  if ((currentTemp <= lowAlarmTemp) || (currentTemp >= highAlarmTemp)) {
+    if ((millis() - lastAlarm) >= (alarmInterval * timeScale)) { 
+      notifyBeep(alarmBeeps);
+      lastAlarm = millis();
+    }
+  }
+
   // Update banner as needed
   if (strcmp(banner,bannerMem) != 0) {
     lcd.setCursor(0,0);
@@ -840,13 +864,13 @@ void loop() {
 
   // Serial Logging
   if (serialLog) {
-    if ((millis() - lastLog) >= (logInterval * timeScale)) {  // more than a minute
+    if ((millis() - lastLog) >= (logInterval * timeScale)) {
       logState();
       lastLog = millis();
     }
   }
 
-  // Wait until looptime has been exceeded
+  // Loop complete; wait until looptime has been exceeded
   while ((millis() - loopStart) <= (loopTime * timeScale)) {
     myDelay(1);
   }
