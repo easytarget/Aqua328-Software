@@ -63,7 +63,7 @@ Speaker loudSpeaker(SPEAKER_PIN);
 // LED State Machine
 // Basic light cycle with fast modes.
 enum activityStates {Off, TurnOn, FastOn, On, TurnOff, FastOff};
-int loopTime = 100; // Minimum loop time (ms)
+int loopTime = 500; // Minimum loop time (ms)
 
 // Lights
 byte blueVal = 0;
@@ -78,7 +78,6 @@ unsigned long dayCycleTime   = 27000000; // daytime lights on period (7h30m)
 unsigned long onPulseTime    =   900000; // Gap between lights-on fan pulses (15m)
 unsigned long offPulseTime   =  3600000; // Gap between lights-off fan pulses (1h)
 unsigned long pulseTime      =    30000; // Fan pulse length (30s)
-unsigned int readTime        =      333; // delay between temperature readings (1/3s)
 
 // Fan 
 // Note: Comment out the fan pin definition in pins.h to disable fan.
@@ -100,9 +99,10 @@ int alarmBeeps = 5;                   // How many beeps to make at interval
 
 // User Interface
 // Note: Set the lid pin to -1 in pins.h to disable lid functionality
-#define BSIZE 13                          // the upper banner size (12 chars + null)
+#define SPEEDUP 300000                    // ms to remove per loop when reducing time remaining (5 mins)
+#define BSIZE 14                          // the upper banner buffer (12 chars + null)
+int bannerSize            = BSIZE - 1;    // banner display size
 long buttonDelay               = 1000;    // button hold down delay (1s)
-unsigned long buttonStart      = 0;       // timer for button
 byte lcdOn                     = 255;     // lcd backlight setting when lights on
 byte lcdOff                    = 32;      // lcd backlight setting when lights off
 bool maintenance               = false;   // maintenance mode (supresses fan and lights)
@@ -137,7 +137,6 @@ void setup()
   feedNowBeepInterval = 5000;
   logInterval = 10000;
   lidBeepInterval = 3000; */
-
 
   // General IO Pins
   if (LIDSWITCH != -1) pinMode(LIDSWITCH,INPUT_PULLUP);  // Lid switch to input & pull-up
@@ -557,9 +556,12 @@ void countDown() {
 unsigned int ledLevel          = 0;                      // Desired LED level (R+G+B) 
 unsigned int ledTotal          = 767;                    // Maximum brightness (R+G+B)
 byte maintDimmer               = 255;                    // Override lights in maintenance
+byte tempDimmer                = 255;                    // Override lights when hot
 int slowStep                   = changeTime / ledTotal;  // Millis per step in On/Off change mode 
-int fastStep                   = 10;                     // Steps per loop cycle in fast On/Off modes
-char bannerMem[BSIZE]          = "          ";           // Only update banner when needed
+int fastStep                   = 16;                     // Steps per loop cycle in fast On/Off modes
+unsigned long buttonStart      = 0;       // timer for button
+char bannerMem[BSIZE]          = "";                     // Only update banner when needed
+int alertPos                   = 0;                      // Alert displayed position index
 bool lidOverride               = false;                  // Used for serial lid open emulation
 bool longButton                = false;                  // records if last button press was 'long'
 unsigned long lastRead         = millis();               // temperature read timer
@@ -571,11 +573,12 @@ unsigned long lastAlarm        = millis()-(alarmInterval*timeScale); // alarm ti
 
 void loop() {
   unsigned long loopStart = millis();  // Note when we started.
-  char banner[BSIZE] = "Aqua328     ";
-  bool button = false;  
+  char banner[BSIZE] = "Aqua328";
+  char alertTxt[80] = "";
+  bool button = false;
   
   // Read the water temperature and set fan appropriately
-  if (tempSensor && ((millis() - lastRead) > (readTime * timeScale))) {
+  if (tempSensor) {
     // Get the temperature and display it
     currentTemp = readTemp();
     lastRead = millis();
@@ -611,7 +614,7 @@ void loop() {
     case FastOn: newLevel+= fastStep; break;
     case On: {
               newLevel = ledTotal;
-              if (maintDimmer == 255) countDown();  // Show remaining ON time
+              if ((maintDimmer == 255) && (tempDimmer == 255)) countDown();  // Show remaining ON time
               // Turn off when we time out
               if (millis()-lastChange > (dayCycleTime*timeScale)) {
                 logTime();
@@ -633,12 +636,12 @@ void loop() {
   }
 
   // Maintenance Dimmer 
-  if (maintenance) maintDimmer = max(maintDimmer-10,0); 
-  else maintDimmer = min(maintDimmer+10,255);
+  if (maintenance) maintDimmer = max(maintDimmer-16,0); 
+  else maintDimmer = min(maintDimmer+16,255);
 
   // Temperature Dimmer 
   const float dimRate = 255 / (ledOffTemp-ledDimTemp);
-  byte tempDimmer = constrain(255 - ((currentTemp - ledDimTemp) * dimRate),0,255);
+  tempDimmer = constrain(255 - ((currentTemp - ledDimTemp) * dimRate),0,255);
   if (tempDimmer < 255) strcpy(banner,"Cooling     ");
 
   // Set the LEDs
@@ -691,8 +694,8 @@ void loop() {
   // lid
   if (LIDSWITCH != -1) {
     if ((digitalRead(LIDSWITCH) == LIDOPEN) || lidOverride) {
-      if (!maintenance) strcpy(banner, "Lid Open    ");
-      else strcpy(banner, "Maintenance ");
+      if (!maintenance) strcpy(banner, "Lid Open");
+      else strcpy(banner, "Maintenance");
       if (lidStart == 0) {
         logTime();
         Serial.println(F("Lid: Opened"));
@@ -724,7 +727,7 @@ void loop() {
     // Feeding Reminder
     if (millis() - lastLid > (feedReminder * timeScale)) {
       if (millis() - lastLid < (feedNowReminder * timeScale)) {
-        strcpy(banner, "Please Feed ");
+        strcpy(banner, "Please Feed");
         if (millis() - lastFeedReminder > (feedBeepInterval * timeScale)) {
           logTime();
           Serial.println(F("Feed Reminder"));
@@ -732,7 +735,7 @@ void loop() {
           lastFeedReminder = millis();
         }
       } else {
-        strcpy(banner, "Feed Us Now ");
+        strcpy(banner, "Feed Us Now");
         if (millis() - lastFeedReminder > (feedNowBeepInterval * timeScale)) {
           logTime();
           Serial.println(F("Feed Now Reminder"));
@@ -743,10 +746,10 @@ void loop() {
     }
   }
 
-  // test if button been activated for a specified time
+  // test if button has been activated for a specified time
   if (digitalRead(USERSWITCH) == USERPRESS) {
     // Button pressed, show default message and start timer if needed
-    strcpy(banner, "Button      ");
+    strcpy(banner, "Button");
     if (buttonStart == 0)
       buttonStart = millis();
 
@@ -768,7 +771,7 @@ void loop() {
     // Process long button if appropriate,
     if (((millis() - buttonStart) > (3 * buttonDelay * timeScale)) && !maintenance) {
       if (ledState == On) {  // reduce 'on' timer when pressed.
-        lastChange = lastChange - (120000 * timeScale); // Serial.println(lastChange);
+        lastChange = lastChange - (SPEEDUP * timeScale); // Serial.println(lastChange);
         strcpy(banner, "Speedup     ");
       } 
       else if (ledState == Off ) {
@@ -780,8 +783,7 @@ void loop() {
       // not yet a long press
       longButton = false;
     }
-  }
-  else if (buttonStart != 0) { 
+  } else if (buttonStart != 0) { 
     // Button not pressed, but timer running: set the flags for button release
     if ((millis() - buttonStart) > (buttonDelay * timeScale)) {  
       logTime();
@@ -791,6 +793,15 @@ void loop() {
     }
     // And always reset the timer
     buttonStart = 0;
+  } 
+  
+  if (buttonStart == 0) {
+    // Button not being pressed; Show alerts
+    if (currentTemp <= lowAlarmTemp) {
+      strcpy(alertTxt, "  TOO COLD !! please check heaters and call maintainer  ");
+    } else if (currentTemp >= highAlarmTemp) {
+      strcpy(alertTxt, "   TOO HOT !! please add cold water and call maintainer ");
+    }
   }
 
   // Process button actions according to state
@@ -838,16 +849,7 @@ void loop() {
     }
   }
 
-  // Temperature Alarms 
-  if (currentTemp <= lowAlarmTemp) {    
-    strcpy(banner, "! TOO COLD !");
-    strcpy(banner, "please check");
-    strcpy(banner, " heaters    ");
-  } else if (currentTemp >= highAlarmTemp) {
-    strcpy(banner, "! TOO HOT ! ");
-    strcpy(banner, " please add ");
-    strcpy(banner, " Cold Water ");
-  }
+  // Temperature Alarm
   if ((currentTemp <= lowAlarmTemp) || (currentTemp >= highAlarmTemp)) {
     if ((millis() - lastAlarm) >= (alarmInterval * timeScale)) { 
       notifyBeep(alarmBeeps);
@@ -855,10 +857,31 @@ void loop() {
     }
   }
 
-  // Update banner as needed
+  // Alerts overlay the banner when set, and scroll
+  int aLen = strlen(alertTxt);
+  if (aLen > 0) {
+    if (aLen <= bannerSize) {
+        strcpy(banner, alertTxt);
+    } else {
+      for (int i = 0; i < bannerSize; i++) {
+        banner[i] = alertTxt[(alertPos + i) % aLen];
+      }
+      alertPos++;
+      if (alertPos >= (aLen)) alertPos=0;
+    }
+  } else {
+    alertPos=0;
+  }
+
+  // Update banner only as needed to avoid flickering, pad with spaces
   if (strcmp(banner,bannerMem) != 0) {
     lcd.setCursor(0,0);
     lcd.print(banner);
+    byte chars = strlen(banner);
+    while (chars <= bannerSize) {
+        lcd.print(' ');
+        chars++;
+    }
     strcpy(bannerMem,banner);
   }
 
