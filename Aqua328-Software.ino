@@ -28,7 +28,10 @@
  changes to 'Feed me Now' and we have 3 beeps every 3 minutes. Opening the lid to feed
  the fish clears this.
 
- Both the Lid and Fan functionality is configurable, and can be disabled if not used.
+ Both the Lid and Fan functionality ios configurable, and can be disabled if not used.
+
+ Alarm temperatures can be set, which trigger a scrolling message and beeps when 
+ the tank is overheating, or cooling too much (heater failures)
 
  Finally: Cheesy tunes entertain and delight (ymmv); beeps feedback when the button is pressed.
 */
