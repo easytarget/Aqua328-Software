@@ -800,9 +800,9 @@ void loop() {
   
   if (buttonStart == 0) {
     // Button not being pressed; Show alerts
-    if (currentTemp <= lowAlarmTemp) {
+    if ((currentTemp <= lowAlarmTemp) && !maintenance) {
       strcpy(alertTxt, "  TOO COLD !! please check heaters and call maintainer  ");
-    } else if (currentTemp >= highAlarmTemp) {
+    } else if ((currentTemp >= highAlarmTemp) && !maintenance) {
       strcpy(alertTxt, "   TOO HOT !! please add cold water and call maintainer ");
     }
   }
@@ -853,7 +853,7 @@ void loop() {
   }
 
   // Temperature Alarm
-  if ((currentTemp <= lowAlarmTemp) || (currentTemp >= highAlarmTemp)) {
+  if (((currentTemp <= lowAlarmTemp) || (currentTemp >= highAlarmTemp)) && !maintenance) {
     if ((millis() - lastAlarm) >= (alarmInterval * timeScale)) { 
       notifyBeep(alarmBeeps);
       lastAlarm = millis();
