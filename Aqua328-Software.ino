@@ -768,12 +768,13 @@ void loop() {
       }
       else {
         strcpy(banner, "Maintenance ");
+        maintenance = true; // enter maintenance immediately.
       }
     }
 
     // Process long button if appropriate,
-    if (((millis() - buttonStart) > (3 * buttonDelay * timeScale)) && !maintenance) {
-      if ((ledState == On) && !maintenance) {  // reduce 'on' timer when pressed.
+    if ((millis() - buttonStart) > (3 * buttonDelay * timeScale)) {
+      if ((ledState == On) && (!maintenance)) {  // reduce 'on' timer when pressed.
         lastChange = lastChange - (SPEEDUP * timeScale); // Serial.println(lastChange);
         strcpy(banner, "Speedup     ");
       } 
@@ -802,9 +803,9 @@ void loop() {
   
   if (buttonStart == 0) {
     // Button not being pressed; Show alerts
-    if ((currentTemp <= lowAlarmTemp) && !maintenance) {
+    if ((currentTemp <= lowAlarmTemp) && (!maintenance)) {
       strcpy(alertTxt, "  TOO COLD !! please check heaters and call maintainer  ");
-    } else if ((currentTemp >= highAlarmTemp) && !maintenance) {
+    } else if ((currentTemp >= highAlarmTemp) && (!maintenance)) {
       strcpy(alertTxt, "   TOO HOT !! please add cold water and call maintainer ");
     }
   }
@@ -850,7 +851,7 @@ void loop() {
       #ifdef FAN
         analogWrite(FAN,0); // force fan off during maintenance
       #endif
-      maintenance = true;
+      // (note: we set maintenance = true earlier, when settign the button feedback)
     }
   }
 
