@@ -577,7 +577,7 @@ unsigned long lastAlarm        = millis()-(alarmInterval*timeScale); // alarm ti
 void loop() {
   unsigned long loopStart = millis();  // Note when we started.
   char banner[BSIZE] = "Aqua328";
-  char alertTxt[80] = "";
+  char alertTxt[120] = "";
   bool button = false;
   
   // Read the water temperature and set fan appropriately
@@ -768,17 +768,20 @@ void loop() {
       }
       else {
         strcpy(banner, "Maintenance ");
+        maintenance = true; // enter maintenance immediately.
       }
     }
 
     // Process long button if appropriate,
-    if (((millis() - buttonStart) > (3 * buttonDelay * timeScale)) && !maintenance) {
-      if (ledState == On) {  // reduce 'on' timer when pressed.
+    if ((millis() - buttonStart) > (3 * buttonDelay * timeScale)) {
+      if ((ledState == On) && (!maintenance)) {  // reduce 'on' timer when pressed.
         lastChange = lastChange - (SPEEDUP * timeScale); // Serial.println(lastChange);
         strcpy(banner, "Speedup     ");
       } 
       else if (ledState == Off ) {
-        strcpy(banner, "Happy Easter");
+        strcpy(banner, "Happy Easter!");
+        // Note; alertTxt maximum length is currently 119 chars.
+        strcpy(alertTxt, "--  This Aquarium controller was designed and built by Owen (owen.carter@gmail.com)  --**");
       }
       longButton = true;
     }
@@ -800,9 +803,9 @@ void loop() {
   
   if (buttonStart == 0) {
     // Button not being pressed; Show alerts
-    if (currentTemp <= lowAlarmTemp) {
+    if ((currentTemp <= lowAlarmTemp) && (!maintenance)) {
       strcpy(alertTxt, "  TOO COLD !! please check heaters and call maintainer  ");
-    } else if (currentTemp >= highAlarmTemp) {
+    } else if ((currentTemp >= highAlarmTemp) && (!maintenance)) {
       strcpy(alertTxt, "   TOO HOT !! please add cold water and call maintainer ");
     }
   }
@@ -848,12 +851,12 @@ void loop() {
       #ifdef FAN
         analogWrite(FAN,0); // force fan off during maintenance
       #endif
-      maintenance = true;
+      // (note: we set maintenance = true earlier, when settign the button feedback)
     }
   }
 
   // Temperature Alarm
-  if ((currentTemp <= lowAlarmTemp) || (currentTemp >= highAlarmTemp)) {
+  if (((currentTemp <= lowAlarmTemp) || (currentTemp >= highAlarmTemp)) && !maintenance) {
     if ((millis() - lastAlarm) >= (alarmInterval * timeScale)) { 
       notifyBeep(alarmBeeps);
       lastAlarm = millis();
@@ -873,7 +876,7 @@ void loop() {
       if (alertPos >= (aLen)) alertPos=0;
     }
   } else {
-    alertPos=0;
+    alertPos=0; // reset position when alert is removed
   }
 
   // Update banner only as needed to avoid flickering, pad with spaces
