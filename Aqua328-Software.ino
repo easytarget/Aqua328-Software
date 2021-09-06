@@ -57,7 +57,10 @@ DallasTemperature sensors(&oneWire);
 
 // Dallas OneWire temperature Sensor
 DeviceAddress tankThermometer;  // Not defined here; we will search for the address during setup
-bool tempSensor=false; 
+
+// Sensor Reading and status
+bool tempSensor=false;
+bool tempCRC=false;
 float currentTemp = -127; // last successful reading (-127 == no sensor or other error)
 
 // Sounds
@@ -249,15 +252,26 @@ bool firstOneWireDevice(void) {
       tankThermometer[i] = addr[i];
     }
     Serial.println();
-    if ( OneWire::crc8( addr, 7) != addr[7]) {
+    // We found a sensor, check if a valid CRC is returned
+    int crcRetries = 5;
+    tempCRC = true;
+    while ( OneWire::crc8( addr, 7) != addr[7]) {
+      crcRetries--;
+      Serial.print("crc try: ");  //DEBUG
+      Serial.print(crcRetries);  //DEBUG
+      Serial.print(", crc8: ");  //DEBUG
+      Serial.println(OneWire::crc8( addr, 7));  //DEBUG
+      if (crcRetries <= 0) {
         logTime();
-        Serial.print(F("Invalid OneWire CRC! No temperature functions available"));
-        return false;
+        Serial.println(F("Invalid OneWire CRC! Temperature functions questionable"));
+        tempCRC = false;
+        break;
+      }
     }
   }
   else {
    logTime();
-   Serial.print(F("No OneWire devices found: No temperature functions available"));
+   Serial.println(F("No OneWire devices found: No temperature functions available"));
    return false;
   }
   oneWire.reset_search();  // stop searching
@@ -279,6 +293,10 @@ float readTemp() {
 // Display temperature reading
 void showTemp(float temp) {
   // Display the temperature
+  if (!tempCRC) {
+    lcd.setCursor(10,1);
+    lcd.print(F("?"));
+  }
   lcd.setCursor(11,1);
   if (temp != -127) {
     lcd.print(temp,1);
@@ -362,6 +380,9 @@ void logState() {
   if (!tempSensor) Serial.print(F("No Sensor: "));
   else if (currentTemp == -127) Serial.print(F("Sensor Error: "));
   else {
+    if (!tempCRC) {
+      Serial.print(F("?"));
+    }
     Serial.print(currentTemp,2);
     Serial.print(char(194));
     Serial.print(char(176));
@@ -587,6 +608,9 @@ void loop() {
     lastRead = millis();
     showTemp(currentTemp);
     fanVal = setFan(currentTemp);
+  } else {
+    lcd.setCursor(11,1);
+    lcd.print(F("      "));
   }
 
   // Fan pulses when not over temp
@@ -802,11 +826,13 @@ void loop() {
   } 
   
   if (buttonStart == 0) {
-    // Button not being pressed; Show alerts
-    if ((currentTemp <= lowAlarmTemp) && (!maintenance)) {
-      strcpy(alertTxt, "  TOO COLD !! please check heaters and call maintainer  ");
-    } else if ((currentTemp >= highAlarmTemp) && (!maintenance)) {
-      strcpy(alertTxt, "   TOO HOT !! please add cold water and call maintainer ");
+    // Button not being pressed; Show alerts if necesscary
+    if ((currentTemp != -127) && !maintenance) {
+      if (currentTemp <= lowAlarmTemp) {
+        strcpy(alertTxt, "  TOO COLD !! please check heaters and call maintainer  ");
+      } else if (currentTemp >= highAlarmTemp) {
+        strcpy(alertTxt, "  TOO HOT !! please add cold water and call maintainer ");
+      }
     }
   }
 
@@ -855,11 +881,13 @@ void loop() {
     }
   }
 
-  // Temperature Alarm
-  if (((currentTemp <= lowAlarmTemp) || (currentTemp >= highAlarmTemp)) && !maintenance) {
-    if ((millis() - lastAlarm) >= (alarmInterval * timeScale)) { 
-      notifyBeep(alarmBeeps);
-      lastAlarm = millis();
+  // Temperature Alarm if necesscary
+  if (tempSensor && (currentTemp != -127) && !maintenance) {
+    if ((currentTemp <= lowAlarmTemp) || (currentTemp >= highAlarmTemp)) {
+      if ((millis() - lastAlarm) >= (alarmInterval * timeScale)) {
+        notifyBeep(alarmBeeps);
+        lastAlarm = millis();
+      }
     }
   }
 
